@@ -1,7 +1,250 @@
 #!/usr/bin/env python
+def getmiddlevolume(func):
+    from nibabel import load
+    funcfile = func
+    if isinstance(func, list):
+        funcfile = func[0]
+    _, _, _, timepoints = load(funcfile).shape
+    return int(timepoints / 2) - 1
+def makeMask(image):
+	#just skullstrips a 3d volume
+def MotionCorrect(func,outDir):
+	import os
+	import subprocess
+	try:
+		import nipype.interfaces.fsl as fsl
+		import nipype.interfaces.afni as afni
+		import numpy as np
+	except:
+		print "Have you installed nipype? 'sudo pip install nipype'"
+		return 1
+
+	mcImg=os.path.join(outDir,'mcImg.nii.gz')
+	mcImgRaw=os.path.join(outDir,'mcImg_raw.par')
+	mcImgMat=os.path.join(outDir,'mcImg_mat.aff12.1D')
+	mcImg1D=os.path.join(outDir,'mcImg1D.mat')
+	mcImgMaxDisp=os.path.join(outDir,'mcImgMaxDisp.mat')
+	mcImgMean=os.path.join(outDir,'mcImgmean.nii.gz')
+	mcImgDegPar=os.path.join(outDir,'mcImg_deg.par')
+	mcImgPar=os.path.join(outDir,'mcImg.par')
+	mcImgMMPar=os.path.join(outDir,'mcImg_mm.par')
+	mcImgABS=os.path.join(outDir,'mcImg_abs.rms')
+	mcImgDerivPar=os.path.join(outDir,'mcImg_deriv.par')
+	mcImgRel=os.path.join(outDir,'mcImg_rel.rms')
+	rotPNG=os.path.join(outDir,'rot.png')
+	transPNG=os.path.join(outDir,'trans.png')
+	rotMMPNG=os.path.join(outDir,'rot_mm.png')
+	rotTRANSPNG=os.path.join(outDir,'rot_trans.png')
+	ABSPNG=os.path.join(outDir,'abs_mot.png')
+	RELPNG=os.path.join(outDir,'rel_mot.png')
+	DISPNG=os.path.join(outDir,'disp.png')
+	############# Set up OutDir and Log file ###########
+	if not os.path.exists(outDir):
+		os.makedirs(outDir)
+	#################################################################
+	#logfile
+	MCLogFile=os.path.join(outDir,'mc.log')
+
+	if os.path.isfile(MCLogFile):
+		MCLog = open(MCLogFile,"a")
+		MCLog.write("-------------New Process-------------\n")
+	else:
+		MCLog = open(MCLogFile,"w")
+
+	if os.path.isfile(mcImg):
+		msg="- mcImg.nii.gz exists, skipping this step\n"
+		print msg
+		MCLog.write(msg)
+	else:
+		#get the middle volume
+		try:
+			halfpoint=getmiddlevolume(func)
+		except:
+			msg='ERROR: getmiddlevolume\n'
+			print msg
+			MCLog.write(msg)
+		#complete motion correction.
+		try:
+			MCcmd=afni.Volreg()
+			MCcmd.inputs.in_file=func
+			MCcmd.inputs.oned_file=mcImg1D
+			MCcmd.inputs.md1d_file=mcImgMaxDisp
+			MCcmd.inputs.oned_matrix_save=mcImgMat
+			MCcmd.inputs.out_file=mcImg
+			MCcmd.inputs.outputtype='NIFTI_GZ'
+			MCcmd.inputs.args='-Fourier -twopass -base %d -dfile %s' % (halfpoint, mcImgRaw)
+			MCcmd.inputs.timeshift=False
+			MCcmd.inputs.zpad=4
+			
+			#run command
+			MCcmd_Result=MCcmd.run()
+		except:
+			print 'ERROR: ' + MCcmd.cmdline + "\n"
+			MCLog.write('ERROR: ' + MCcmd.cmdline + "\n")
+			MCLog.close()
+			return 1
+
+		#log that flirt finished successfully			
+		MCLog.write('SUCCESS: ' + MCcmd.cmdline + "\n")
+
+	#Take the mean of mcImg.nii.gz (for use in reg)
+	if os.path.isfile(mcImgMean):
+		msg="- mcImgMean.nii.gz exists, skipping this step\n"
+		print msg
+		MCLog.write(msg)
+	else:
+		 #get the mean from mcImg.nii.gz
+		 try:
+		 	 MeanCmd=fsl.MeanImage()
+		 	 MeanCmd.inputs.in_file=mcImg
+		 	 MeanCmd.inputs.dimension='T'
+		 	 MeanCmd.inputs.out_file=mcImgMean
+		 	 MeanCmd.inputs.nan2zeros=True
+		 	 MeanCmd.inputs.internal_datatype='float'
+		 	 MeanCmd.inputs.output_datatype='float'
+		 	 MeanCmd.run()
+
+		 except:
+		 	 msg='ERROR: ' + MeanCmd.cmdline +'\n'
+		 	 print msg
+		 	 MCLog.write(msg)
+		 	 MCLog.close()
+		 	 return 1
+
+		 #log that flirt finished successfully			
+		 MCLog.write('SUCCESS: ' + MeanCmd.cmdline + "\n")
+
+
+
+	#read in mcImg_raw.par
+	#Save out mcImg.par (like fsl) with only the translations and rotations
+    #mcflirt appears to have a different rotation/translation order.  Reorder 3dvolreg output to match "RPI" FSL ordering
+    ##AFNI ordering
+    #roll  = rotation about the I-S axis }
+ 	#pitch = rotation about the R-L axis } degrees CCW
+  	#yaw   = rotation about the A-P axis }
+  	#dS  = displacement in the Superior direction  }
+  	#dL  = displacement in the Left direction      } mm
+  	#dP  = displacement in the Posterior direction }
+	mcImgRawFile=open(mcImgRaw,'r')
+	mcImgRaw_np=np.array([[float(x) for x in line.strip().split()] for line in mcImgRawFile])
+	mcImgRawFile.close()
+
+	mcImgDeg_np=mcImgRaw_np[:,[2,3,1,5,6,4]]
+	mcImgDegPar_id=open(mcImgDegPar, 'w')
+	np.savetxt(mcImgDegPar_id,mcImgDeg_np,fmt='%.10f')
+	mcImgDegPar_id.close()
+
+	#Need to convert rotational parameters from degrees to radians
+    #rotRad= (rotDeg*pi)/180
+    #pi=3.14159
+	pi=3.14159
+	trans_mcImgPar_np=np.multiply(mcImgDeg_np[:,[0,1,2]],(pi/180))
+	notrans_mcImgPar_np=mcImgDeg_np[:,[3,4,5]]
+	mcImgPar_np=np.concatenate((trans_mcImgPar_np,notrans_mcImgPar_np),axis=1)
+	mcImgPar_id=open(mcImgPar, 'w')
+	np.savetxt(mcImgPar_id,mcImgPar_np,fmt='%.10f')
+	mcImgPar_id.close()
+
+	#Need to create a version where ALL (rotations and translations) measurements are in mm.  Going by Power 2012 Neuroimage paper, radius of 50mm.
+    #Convert degrees to mm, leave translations alone.
+    #rotDeg= ((2r*Pi)/360) * Degrees = Distance (mm)
+    #d=2r=2*50=100
+    #pi=3.14159
+	d=100
+	trans_mcImgMM_np=np.multiply(mcImgDeg_np[:,[0,1,2]],(d*pi/360))
+	notrans_mcImgMM_np=mcImgDeg_np[:,[3,4,5]]
+	mcImgMM_np=np.concatenate((trans_mcImgMM_np,notrans_mcImgMM_np),axis=1)
+	mcImgMM_id=open(mcImgMMPar, 'w')
+	np.savetxt(mcImgMM_id,mcImgMM_np,fmt='%.10f')
+	mcImgMM_id.close()
+
+	#Cut motion parameter file into 6 distinct TR parameter files
+	for x in range(0,6):
+		index=x+1
+		mc_file=(os.path.join(outDir,"mc" + str(index) + ".txt"))
+		mc_file_id=open(mc_file, 'w')
+		np.savetxt(mc_file_id,mcImgPar_np[:,x],fmt='%.10f')
+		mc_file_id.close()
+
+
+	#Absolute Displacement
+	subprocess.check_output("awk '{print (sqrt(0.2*80^2*((cos($1)-1)^2+(sin($1))^2 + (cos($2)-1)^2 + (sin($2))^2 + (cos($3)-1)^2 + (sin($3)^2)) + $4^2+$5^2+$6^2))}' %s > %s" % (mcImgPar, mcImgABS),stderr=subprocess.STDOUT, shell=True)
+
+	
+    #Create the relative displacement .par file from the input using AFNI's 1d_tool.py to first calculate the derivatives
+	subprocess.check_output("1d_tool.py -infile %s -set_nruns 1 -derivative -write %s -overwrite" % (mcImgPar, mcImgDerivPar),stderr=subprocess.STDOUT, shell=True)
+
+	#Relative Displacement
+	subprocess.check_output("awk '{print (sqrt(0.2*80^2*((cos($1)-1)^2+(sin($1))^2 + (cos($2)-1)^2 + (sin($2))^2 + (cos($3)-1)^2 + (sin($3)^2)) + $4^2+$5^2+$6^2))}' %s > %s" % (mcImgDerivPar, mcImgRel),stderr=subprocess.STDOUT, shell=True)
+
+	#rotation plot (degrees)
+	RotPlot=fsl.PlotMotionParams()
+	RotPlot.inputs.in_file=mcImgPar
+	RotPlot.inputs.in_source='fsl'
+	RotPlot.inputs.plot_type='rotations'
+	RotPlot.inputs.plot_size=(300,800)
+	RotPlot.inputs.out_file=rotPNG
+	RotPlot_Result=RotPlot.run()
+
+	#translation plot (mm)
+	TransPlot=fsl.PlotMotionParams()
+	TransPlot.inputs.in_file=mcImgPar
+	TransPlot.inputs.in_source='fsl'
+	TransPlot.inputs.plot_type='translations'
+	TransPlot.inputs.plot_size=(300,800)
+	TransPlot.inputs.out_file=transPNG
+	TransPlot_Result=TransPlot.run()
+
+	#rotation plot (mm)
+	RotMMPlot=fsl.PlotMotionParams()
+	RotMMPlot.inputs.in_file=mcImgMMPar
+	RotMMPlot.inputs.in_source='fsl'
+	RotMMPlot.inputs.plot_type='rotations'
+	RotMMPlot.inputs.plot_size=(300,800)
+	RotMMPlot.inputs.out_file=rotMMPNG
+	RotMMPlot_Result=RotMMPlot.run()
+
+	#displacement (mm)
+	RotTransMMPlot=fsl.PlotMotionParams()
+	RotTransMMPlot.inputs.in_file=mcImgMMPar
+	RotTransMMPlot.inputs.in_source='fsl'
+	RotTransMMPlot.inputs.plot_type='displacement'
+	RotTransMMPlot.inputs.plot_size=(300,800)
+	RotTransMMPlot.inputs.out_file=rotMMPNG
+	RotTransMMPlot_Result=RotMMPlot.run()
+	
+	#absolute motion
+	AbsPlot=fsl.PlotMotionParams()
+	#AbsRelPlot.inputs.in_file=mcImgABS
+	AbsPlot.inputs.in_file=mcImgABS
+	AbsPlot.inputs.in_source='fsl'
+	#AbsRelPlot.inputs.args='-i %s,%s -a absolute,relative -t "3dvolreg estimated mean displacement (mm)"' % (mcImgABS, mcImgRel)
+	AbsPlot.inputs.plot_type='displacement'
+	AbsPlot.inputs.plot_size=(300,800)
+	AbsPlot.inputs.out_file=ABSPNG
+	AbsPlot_Result=AbsPlot.run()
+
+	#relative motion
+	RelPlot=fsl.PlotMotionParams()
+	RelPlot.inputs.in_file=mcImgRel
+	RelPlot.inputs.in_source='fsl'
+	RelPlot.inputs.plot_type='displacement'
+	RelPlot.inputs.plot_size=(300,800)
+	RelPlot.inputs.out_file=RELPNG
+	RelPlot_Result=RelPlot.run()
+
+	#write finished imformation to log and close log.
+	msg="SUCCESS: MotionCorrection"
+	print msg
+	MCLog.write(msg)
+	MCLog.close()
+
+	#return success
+	return 0
 
 # Functions for ICA-AROMA v0.3 beta
-def GenTransforms(fslDir,outDir,func,T1_brain,T1_head):
+def GenTransforms(fslstandards,outDir,ex_func,T1_brain,T1_head,fmap=None,fmapmag=None,fmapmagbrain=None,echospacing=None,pedir=None):
 	"""################
 	   #function: GenTransforms
 	   ################
@@ -11,12 +254,19 @@ def GenTransforms(fslDir,outDir,func,T1_brain,T1_head):
 	   ################
 	   #input: fslDir- full path to the overview of FSL (e.g. /usr/local/fsl)
 	   #       outDir- full path to the directory where the transforms are made 
-	   #       func- full path to the functional image
+	   #       ex_func- full path to an example 3D functional image
 	   #       T1_brain- full path to the T1_brain
 	   #       T1_head- full path to the T1_head
+	   # Optional arguments (for fieldmap processing)
+	   #	   fmap - full path to fmap
+	   #	   fmapmag - full path to field map magnitude (head)
+	   #	   fmapmagbrain - full path to field map magnitude (brain)
+	   #	   echospacing - dwell time
+	   #	   pedir - ?
 	   ################
 	   #output: T1toMNI_warp.nii.gz
 	   #        T1toMNI.mat
+	   #		T1toMNI_flirt
 	   #        functoT1.mat
 	   #        functoMNI_warp.nii.gz
 	   #        MNItoT1_warp.nii.gz
@@ -25,104 +275,351 @@ def GenTransforms(fslDir,outDir,func,T1_brain,T1_head):
 	   ################"""
 	# Import needed modules
 	import os
-	import commands
-	import subprocess
+	try:
+		import nipype.interfaces.fsl as fsl
+	except:
+		print "Have you installed nipype? 'sudo pip install nipype'"
+		return 1
+
+	############# Set up OutDir and Log file ###########
+	if not os.path.exists(outDir):
+		os.makedirs(outDir)
+	#################################################################
+	#logfile
+	RegLogFile=os.path.join(outDir,'reg.log')
+
+	if os.path.isfile(RegLogFile):
+		RegLog = open(RegLogFile,"a")
+		RegLog.write("-------------New Process-------------\n")
+	else:
+		RegLog = open(RegLogFile,"w")
 	################# Output Variable Names ###################
 	#define fsl pathnames
-	#fsl bin
-	fslbin=os.path.join(fslDir,'bin/')
+	#fsl bin (ubuntu installation)
+	#fslbin=os.path.join(fslDir,'bin/')
 
-	#fsl MNI files
-	fslstandards=os.path.join(fslDir,'data/standard/')
+	#fsl MNI files (ubuntu installation)
+	#fslstandards=os.path.join(fslDir,'data/standard/')
+
 	# Define output files
 	#T1 to MNI
 	T1toMNI_warp=os.path.join(outDir,'T1toMNI_warp.nii.gz')
 	T1toMNI_mat=os.path.join(outDir,'T1toMNI.mat')
-
+	T1toMNI_flirt=os.path.join(outDir,'T1toMNI_flirt.nii.gz')
+	T1toMNI_fnirt=os.path.join(outDir,'T1toMNI_fnirt.nii.gz')
+	T1toMNI_fnirt_log=os.path.join(outDir,'T1toMNIfnirt.log')
 	#MNI to T1
 	MNItoT1_warp=os.path.join(outDir,'MNItoT1_warp.nii.gz')
 	MNItoT1_mat=os.path.join(outDir,'MNItoT1.mat')
 
 	#func to T1
+	functoT1_base=os.path.join(outDir,'functoT1')
 	functoT1_mat=os.path.join(outDir,'functoT1.mat')
 
 	#T1 to func
 	T1tofunc_mat=os.path.join(outDir,'T1tofunc.mat')
 
 	#func to MNI
-	functoMNI=os.path.join(outDir,'functoMNI_warp.nii.gz')
+	functoMNI_warp=os.path.join(outDir,'functoMNI_warp.nii.gz')
 
 	#MNI to func
-	MNItofunc=os.path.join(outDir,'MNItofunc_warp.nii.gz')
+	MNItofunc_warp=os.path.join(outDir,'MNItofunc_warp.nii.gz')
 
-	############# Check to see if output directory exists ###########
-	if not os.path.exists(outDir):
-		os.makedirs(outDir)
+	
+	#### Check if there is special fieldmap processing ####
+	if not fmap==None and not fmapmag==None and not fmapmagbrain==None and not echospacing==None and not pedir==None:
+		T1tofunc_warp=os.path.join(outDir,'T1tofunc_warp.nii.gz')
+		functoT1_warp=os.path.join(outDir,'functoT1_warp.nii.gz')
+		fieldmap=True
+	else:
+		fieldmap=False
+
+	RegLog.write("Fieldmap: " + str(fieldmap) + "\n")
 
 
 	#T1toMNI transforms
 	if os.path.isfile(T1toMNI_warp) and os.path.isfile(T1toMNI_mat):
-			print '- Warp and mat from T1 to MNI already exists, skipping this step'
+			 msg="- Warp and mat from T1 to MNI already exists, skipping this step\n"
+			 print msg
+			 RegLog.write(msg)
 	else: 
-			#flirt (mat) linear transform
-			try:
-				subprocess.call(' '.join([os.path.join(fslbin,'flirt'),
-					'-in ' + T1_brain,
-					'-ref ' + os.path.join(fslstandards,'MNI152_T1_2mm_brain.nii.gz'),
-					'-omat ' + T1toMNI_mat]), shell=True)
-			except:
-				print 'flirt failed to create ' + T1toMNI_mat
-				return 1
+		#flirt (mat) linear transform
+		try:
+			T1toMNIflt = fsl.FLIRT()
+			T1toMNIflt.inputs.in_file=T1_brain
+			T1toMNIflt.inputs.reference=os.path.join(fslstandards,'MNI152_T1_2mm_brain.nii.gz')
+			T1toMNIflt.inputs.out_matrix_file=T1toMNI_mat
+			T1toMNIflt.inputs.out_file=T1toMNI_flirt
+			
+			#print the command being ran:
+			#print T1toMNIflt.cmdline
 
-			#fnirt (warp) nonlinear transform
-			try:
-				subprocess.call(' '.join([os.path.join(fslbin,'fnirt'),
-					'--in=' + T1_head,
-					'--aff=' + T1toMNI_mat,
-					'--ref=' + os.path.join(fslstandards,'MNI152_T1_2mm_brain.nii.gz'),
-					'--config=T1_2_MNI152_2mm.cnf',
-					'--cout=' + T1toMNI_warp,
-					'--jacrange=0.1,10']), shell=True)
-			except:
-				print 'fnirt failed to create' + T1toMNI_warp
-				return 1
-			print "flirt and fnirt successfully created %s\n and\n %s\n" % (T1toMNI_mat, T1toMNI_warp)
+			#run the command:
+			T1toMNIflt_Result = T1toMNIflt.run()
+		except:
+			RegLog.write('ERROR: ' + T1toMNIflt.cmdline + "\n")
+			RegLog.close()
+			return 1
+		#log that flirt finished successfully			
+		RegLog.write('SUCCESS: ' + T1toMNIflt.cmdline + "\n")
 
 
+		#fnirt (warp) nonlinear transform
+		try:
+			T1toMNIfnt=fsl.FNIRT()
+			T1toMNIfnt.inputs.in_file=T1_head
+			T1toMNIfnt.inputs.ref_file=os.path.join(fslstandards,'MNI152_T1_2mm.nii.gz')
+			T1toMNIfnt.inputs.affine_file=T1toMNI_mat
+			T1toMNIfnt.inputs.config_file='T1_2_MNI152_2mm'
+			T1toMNIfnt.inputs.fieldcoeff_file=T1toMNI_warp
+			T1toMNIfnt.inputs.warped_file=T1toMNI_fnirt
+			T1toMNIfnt.inputs.jacobian_range=(.1,10)
+			T1toMNIfnt.inputs.log_file=T1toMNI_fnirt_log
+			#print the command:
+			#print T1toMNIfnt.cmdline
 
-		#MNItoT1 transforms
+			#run the command
+			T1toMNIfnt_Result = T1toMNIfnt.run()
+		except:
+			RegLog.write('ERROR: ' + T1toMNIfnt.cmdline + "\n")
+			RegLog.close()
+			return 1
+		#log that fnirt finished successfully
+		RegLog.write('SUCCESS: ' + T1toMNIfnt.cmdline + "\n")
+
+	#MNItoT1 transforms
 	if os.path.isfile(MNItoT1_warp) and os.path.isfile(MNItoT1_mat):
-		print '- Warp and mat from MNI to T1 already exists, skipping this step'
+		msg="- Warp and mat from MNI to T1 already exists, skipping this step\n"
+		print msg
+		RegLog.write(msg)
 	else:
 		#inverse the T1toMNI linear transform
 		try:
-			subprocess.call(' '.join([os.path.join(fslbin,'convert_xfm'),
-				'-omat ' + MNItoT1_mat,
-				'-inverse ' + T1toMNI_mat], shell=True))
-		except:
-			print 'convert_xfm failed to create' + MNItoT1_mat
-			return 1
+			MNItoT1xfm=fsl.ConvertXFM()
+			MNItoT1xfm.inputs.in_file=T1toMNI_mat
+			MNItoT1xfm.inputs.invert_xfm=True
+			MNItoT1xfm.inputs.out_file=MNItoT1_mat
 
-		try:
-		 	subprocess.call(' '.join([os.path.join(fslbin,'invwarp'),
-				'-w ' + T1toMNI_warp,
-				'-o ' + MNItoT1_warp,
-				'-r ' + T1_head], shell=True))
+			#print the command:
+			#print MNItoT1xfm.cmdline
+
+			#run the command
+			MNItoT1xfm_Result = MNItoT1xfm.run()
 		except:
-			print 'convert_xfm failed to create' + MNItoT1_warp
+			RegLog.write('ERROR: ' + MNItoT1xfm.cmdline + "\n")
+			RegLog.close()
 			return 1
+		#log that fnirt finished successfully
+		RegLog.write('SUCCESS: ' + MNItoT1xfm.cmdline + "\n")
+		
+		try:
+			MNItoT1invw=fsl.InvWarp()
+			MNItoT1invw.inputs.warp=T1toMNI_warp
+			MNItoT1invw.inputs.reference=T1_head
+			MNItoT1invw.inputs.inverse_warp=MNItoT1_warp
+
+			#print the command:
+			#print MNItoT1invw.cmdline
+
+			#run the command
+			MNItoT1invw_Result = MNItoT1invw.run()
+		except:
+			RegLog.write('ERROR: ' + MNItoT1invw.cmdline + "\n")
+			RegLog.close()
+			return 1
+		#log that fnirt finished successfully
+		RegLog.write('SUCCESS: ' + MNItoT1invw.cmdline + "\n")
 	
 
-	#TODO: func to everything, everything to func
+	#functoT1 transform
 	if os.path.isfile(functoT1_mat):
-		print '- Warp and mat from MNI to T1 already exists, skipping this step'
+		if fieldmap and os.path.isfile(functoT1_warp):
+			msg='- Warp and mat from func to T1 already exists, skipping this step\n'
+		else:
+			msg='- Mat from func to T1 already exists, skipping this step\n'
+		print msg
+		RegLog.write(msg)
 	else:
-		try: 
-			subprocess.call(' '.join([os.path.join(fslbin,'epi_reg')]))	
-		return 0
+		#start making the epireg command
+		functoT1epireg=fsl.EpiReg()
+
+		#special fieldmap options
+		if fieldmap:
+			functoT1epireg.inputs.fmap=fmap
+			functoT1epireg.inputs.fmapmag=fmapmag
+			functoT1epireg.inputs.fmapmagbrain=fmapmagbrain
+			functoT1epireg.inputs.echospacing=echospacing
+			functoT1epireg.inputs.pedir=pedir
+		#default arguments
+		functoT1epireg.inputs.epi=ex_func
+		functoT1epireg.inputs.t1_head=T1_head
+		functoT1epireg.inputs.t1_brain=T1_brain
+		functoT1epireg.inputs.out_base=functoT1_base
+
+		try:
+			functoT1epireg.run()
+		except:
+			RegLog.write('ERROR: ' + functoT1epireg.cmdline + "\n")
+			RegLog.close()
+			return 1
+		#log that epi_reg finished successfully
+		RegLog.write('SUCCESS: ' + functoT1epireg.cmdline + "\n")
+
+	#T1tofunc transform
+	if os.path.isfile(T1tofunc_mat):
+		if fieldmap and os.path.isfile(T1tofunc_warp):
+			msg='- Warp and mat from T1 to func already exists, skipping this step\n'
+		else:
+			msg='- Mat from T1 to func already exists, skipping this step\n'
+		print msg
+		RegLog.write(msg)
+
+	else:
+		#do invwarp if there is a fieldmap
+		if fieldmap:
+			T1tofuncinvw=fsl.InvWarp()
+			T1tofuncinvw.inputs.warp=functoT1_warp
+			T1tofuncinvw.inputs.reference=ex_func
+			T1tofuncinvw.inputs.inverse_warp=T1tofunc_warp
+
+			try:
+				T1tofuncinvw.run()
+			except:
+				RegLog.write('ERROR: ' + T1tofuncinvw.cmdline + "\n")
+				RegLog.close()
+				return 1
+
+			#log that invwarp finished successfully
+			RegLog.write('SUCCESS: ' + T1tofuncinvw.cmdline + "\n")
+
+		#convert xfm for the mat file
+		T1tofuncxfm=fsl.ConvertXFM()
+		T1tofuncxfm.inputs.in_file=functoT1_mat
+		T1tofuncxfm.inputs.invert_xfm=True
+		T1tofuncxfm.inputs.out_file=T1tofunc_mat
+
+		try:
+			T1tofuncxfm.run()
+		except:
+			RegLog.write('ERROR: ' + T1tofuncxfm.cmdline + "\n")
+			RegLog.close()
+			return 1
+
+		#log that invwarp finished successfully
+		RegLog.write('SUCCESS: ' +  T1tofuncxfm.cmdline + "\n")
 
 
+	#sum warps/transforms to get MNItoEPI warp
+	if os.path.isfile(MNItofunc_warp):
+		msg='- Warp from MNI to EPI already exists, skipping this step\n'
+		print msg
+		RegLog.write(msg)
 
+	else:
+
+		#setup command
+		MNItofuncWarp=fsl.ConvertWarp()
+		#special fieldmap option
+		if fieldmap:
+			MNItofuncWarp.inputs.warp2=T1tofunc_warp
+		else:
+			MNItofuncWarp.inputs.postmat=T1tofunc_mat
+
+		#default
+		MNItofuncWarp.inputs.reference=ex_func
+		MNItofuncWarp.inputs.warp1=MNItoT1_warp
+		MNItofuncWarp.inputs.out_relwarp=True
+		MNItofuncWarp.inputs.out_file=MNItofunc_warp
+
+		try:
+			MNItofuncWarp.run()
+		except:
+			RegLog.write('ERROR: ' + MNItofuncWarp.cmdline + "\n")
+			RegLog.close()
+			return 1
+
+		#log that ConvertWarp finished successfully
+		RegLog.write('SUCCESS: ' +  MNItofuncWarp.cmdline + "\n")
+
+	#invert the MNItofunc warp to make the functoMNI warp
+	if os.path.isfile(functoMNI_warp):
+		msg="- Warp from func to MNI already exists, skipping this step\n"
+		print msg
+		RegLog.write(msg)
+	else:
+		functoMNIinvw=fsl.InvWarp()
+		functoMNIinvw.inputs.warp=MNItofunc_warp
+		functoMNIinvw.inputs.reference=os.path.join(fslstandards,'MNI152_T1_2mm.nii.gz')
+		functoMNIinvw.inputs.inverse_warp=functoMNI_warp
+
+		try:
+			functoMNIinvw.run()
+		except:
+			RegLog.write('ERROR: ' + functoMNIinvw.cmdline + "\n")
+			RegLog.close()
+			return 1
+
+		#log that invwarp finished successfully
+		RegLog.write('SUCCESS: ' + functoMNIinvw.cmdline + "\n")
+
+	#finish the function	
+	msg='SUCCESS: GetTransforms\n'
+	print msg
+	RegLog.write(msg)
+	return 0
+
+	# if os.path.isfile(functoT1_mat):
+	# 	if fieldmap and os.path.isfile(functoT1_warp):
+	# 		msg='- Warp and mat from func to T1 already exists, skipping this step\n'
+	# 	else:	
+	# 		msg='- Mat from func to T1 already exists, skipping this step\n'
+	# 	print msg
+	# 	RegLog.write(msg)
+	# else:
+	# 	functoT1epireg=fsl.EPIReg()
+
+	# if fieldmap:
+	# 	epi_regopts=(os.path.join(fslbin,'epi_reg '),
+	# 				 ' --epi=' + ex_func,
+	# 				 ' --t1=' + T1_head,
+	# 				 ' --t1brain=' + T1_brain,
+	# 				 ' --out=' + functoT1_base,
+	# 				 ' --fmap=' + fmap,
+	# 				 ' --fmapmag' + fmapmag,
+	# 				 ' --fmapmagbrain=' + fmapmagbrain,
+	# 				 ' --echospacing=' + str(echospacing),
+	# 				 ' --pedir=' + str(pedir))
+	# else:
+	# 	epi_regopts=(os.path.join(fslbin,'epi_reg'),
+	# 				 ' --epi=' + func,
+	# 				 ' --t1=' + T1_head,
+	# 				 ' --t1brain=' + T1_brain,
+	# 				 ' --out=' + functoT1_base)
+
+	
+	# else:
+	# 	print ' '.join(epi_regopts)
+	# 	try: 
+	# 		subprocess.check_output(' '.join(epi_regopts), shell=True)	
+	# 	except :
+	# 		print 'epi_reg failed to create' + functoT1_mat
+	# 		return 1
+
+	# #T1tofunc
+	# if os.path.isfile(T1tofunc_mat):
+	# 	print 'mat file from T1 to func already exists, skipping this step'
+	# else
+	# 	if fieldmap:
+	# 		try:
+	# 	 		subprocess.check_output(' '.join([os.path.join(fslbin,'invwarp'),
+	# 				'-w ' + functoT1_warp,
+	# 				'-o ' + T1tofunc_warp,
+	# 				'-r ' + func]), shell=True,stderr=var)
+	# 		except:
+	# 			print 'invwarp failed to create ' + MNItoT1_warp
+	
+
+def skullstripEPI(func,T1_brain,)
 
 def runICA(fslDir, inFile, outDir, melDirIn, mask, dim, TR):
 	""" This function runs MELODIC and merges the mixture modeled thresholded ICs into a single 4D nifti file
@@ -665,3 +1162,8 @@ def denoising(fslDir, inFile, outDir, melmix, denType, denIdx):
 			os.symlink(inFile,os.path.join(outDir,'denoised_func_data_nonaggr.nii.gz'))
 		if (denType == 'aggr') or (denType == 'both'):
 			os.symlink(inFile,os.path.join(outDir,'denoised_func_data_aggr.nii.gz'))
+
+#import BetaSeries_functions
+#test:  BetaSeries_functions.GenTransforms('/usr/share/fsl/5.0/','/home/james/RestingState_dev/','/home/james/RestingState_dev/data/pre_sub10_REST_RPI.nii.gz','/home/james/RestingState_dev/data/pre_sub10_MPRAGE-1_RPI_ss.nii.gz','/home/james/RestingState_dev/data/pre_sub10_MPRAGE-1_RPI.nii.gz')
+
+# BetaSeries_functions.GenTransforms('/usr/share/fsl/data/standard/','/home/james/RestingState_dev/reg','/home/james/RestingState_dev/test/mc/mcImgmean.nii.gz','/home/james/RestingState_dev/data/pre_sub10_MPRAGE-1_RPI_ss.nii.gz','/home/james/RestingState_dev/data/pre_sub10_MPRAGE-1_RPI.nii.gz')

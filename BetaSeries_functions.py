@@ -6,8 +6,32 @@ def getmiddlevolume(func):
         funcfile = func[0]
     _, _, _, timepoints = load(funcfile).shape
     return int(timepoints / 2) - 1
+
+
 def makeMask(image):
-	#just skullstrips a 3d volume
+	#binarizes a 3d volume
+	import os
+	import nipype.interfaces.fsl as fsl
+	import string
+	#Name the output (NIFTI)
+	MaskFile=string.replace(image,".nii.gz","_mask.nii.gz")
+
+	#set up the command
+	MaskCmd=fsl.ImageMaths()
+	MaskCmd.inputs.in_file=image
+	MaskCmd.inputs.out_file=MaskFile
+	MaskCmd.inputs.op_string='-bin'
+
+	try:
+		MaskCmd.run()
+	except:
+		print 'ERROR: ' + MaskCmd.cmdline + '\n'
+		return 1
+
+	print 'SUCCESS: ' + MaskCmd.cmdline + '\n'
+	return 0
+
+
 def MotionCorrect(func,outDir):
 	import os
 	import subprocess
@@ -275,6 +299,7 @@ def GenTransforms(fslstandards,outDir,ex_func,T1_brain,T1_head,fmap=None,fmapmag
 	   ################"""
 	# Import needed modules
 	import os
+	import string
 	try:
 		import nipype.interfaces.fsl as fsl
 	except:
@@ -325,6 +350,7 @@ def GenTransforms(fslstandards,outDir,ex_func,T1_brain,T1_head,fmap=None,fmapmag
 	#MNI to func
 	MNItofunc_warp=os.path.join(outDir,'MNItofunc_warp.nii.gz')
 
+	
 	
 	#### Check if there is special fieldmap processing ####
 	if not fmap==None and not fmapmag==None and not fmapmagbrain==None and not echospacing==None and not pedir==None:
@@ -618,8 +644,73 @@ def GenTransforms(fslstandards,outDir,ex_func,T1_brain,T1_head,fmap=None,fmapmag
 	# 		except:
 	# 			print 'invwarp failed to create ' + MNItoT1_warp
 	
+#test: BetaSeries_functions.skullstripEPI('/home/james/RestingState_dev/test/mc/mcImg.nii.gz','/home/james/RestingState_dev/data/pre_sub10_MPRAGE-1_RPI_ss.nii.gz','/home/james/RestingState_dev/reg/T1tofunc.mat')
+def skullstripEPI(func,T1_brain,T1tofunc_mat,T1tofunc_warp=None):
+	#T1_mask (Assumes NIFTI)
+	import os
+	import string
+	import nipype.interfaces.fsl as fsl
+	T1_mask=string.replace(T1_brain,".nii.gz","_mask.nii.gz")
+	EPI_mask=string.replace(func,".nii.gz","_mask.nii.gz")
+	func_brain=string.replace(func,".nii.gz","_brain.nii.gz")
+	makeMask(T1_brain)
 
-def skullstripEPI(func,T1_brain,)
+	if T1tofunc_warp is not None and os.path.isfile(T1tofunc_warp):
+		T1tofuncMask=fsl.ApplyWarp()
+		T1tofuncMask.inputs.in_file=T1_mask
+		T1tofuncMask.inputs.out_file=EPI_mask
+		T1tofuncMask.inputs.ref_file=func
+		T1tofuncMask.inputs.field_file=T1tofunc_warp
+		T1tofuncMask.inputs.interp='nn'
+		T1tofuncMask.inputs.datatype='char'
+
+		try:
+			T1tofuncMask.run()
+		except:
+			print 'ERROR: ' + T1tofuncMask.cmdline + "\n"
+			return 1
+		#log that ApplyWarp finished successfully
+		print 'SUCCESS: ' +  T1tofuncMask.cmdline + "\n"
+	else:
+  		 
+  		#tApplyXfm will be deprecated, eventually make it fsl.ApplyXFM
+  		T1tofuncMask=fsl.ApplyXfm()
+  		T1tofuncMask.inputs.in_file=T1_mask
+		T1tofuncMask.inputs.out_file=EPI_mask
+		T1tofuncMask.inputs.reference=func
+		T1tofuncMask.inputs.in_matrix_file=T1tofunc_mat
+		T1tofuncMask.inputs.interp='nearestneighbour'
+		T1tofuncMask.inputs.datatype='char'
+
+		try:
+			T1tofuncMask.run()
+		except:
+			print 'ERROR: ' + T1tofuncMask.cmdline + "\n"
+			return 1
+
+		#log that ApplyWarp finished successfully
+		print 'SUCCESS: ' +  T1tofuncMask.cmdline + "\n"
+
+
+	#make func_brain
+	ApplyEPIMask=fsl.ImageMaths()
+	ApplyEPIMask.inputs.in_file=func
+	ApplyEPIMask.inputs.in_file2=EPI_mask
+	ApplyEPIMask.inputs.out_file=func_brain
+	ApplyEPIMask.inputs.op_string='-mul'
+
+	try:
+		ApplyEPIMask.run()
+	except:
+		print 'ERROR: ' + ApplyEPIMask.cmdline + "\n"
+		return 1
+
+	#log that ApplyMask finished successfully
+	print 'SUCCESS: ' +  ApplyEPIMask.cmdline + "\n"
+
+	#report successful outcome
+	print 'SUCCESS: skullstripEPI\n'
+	return 0
 
 def runICA(fslDir, inFile, outDir, melDirIn, mask, dim, TR):
 	""" This function runs MELODIC and merges the mixture modeled thresholded ICs into a single 4D nifti file

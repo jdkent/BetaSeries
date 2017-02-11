@@ -286,7 +286,7 @@ def GenTransforms(fslstandards,outDir,ex_func,T1_brain,T1_head,fmap=None,fmapmag
 	   #	   fmapmag - full path to field map magnitude (head)
 	   #	   fmapmagbrain - full path to field map magnitude (brain)
 	   #	   echospacing - dwell time
-	   #	   pedir - ?
+	   #	   pedir - phase encoding direction
 	   ################
 	   #output: T1toMNI_warp.nii.gz
 	   #        T1toMNI.mat
@@ -594,64 +594,29 @@ def GenTransforms(fslstandards,outDir,ex_func,T1_brain,T1_head,fmap=None,fmapmag
 	RegLog.write(msg)
 	return 0
 
-	# if os.path.isfile(functoT1_mat):
-	# 	if fieldmap and os.path.isfile(functoT1_warp):
-	# 		msg='- Warp and mat from func to T1 already exists, skipping this step\n'
-	# 	else:	
-	# 		msg='- Mat from func to T1 already exists, skipping this step\n'
-	# 	print msg
-	# 	RegLog.write(msg)
-	# else:
-	# 	functoT1epireg=fsl.EPIReg()
+#idk about the inputs, I think this way minimizes the processing?
+def Spatial_Smooth(func_brain,func_mask,func_mean):
+	#func is motion corrected and stripped.	
+	#mean=$(fslstats ${mean_func} -k ${mask} -p 50)
+	#brightness threshold=mean*.75
+	#susan $1 ${brightness_threshold} 2.5 3 1 1 ${mean_func} ${brightness_threshold} ${smoothName}
 
-	# if fieldmap:
-	# 	epi_regopts=(os.path.join(fslbin,'epi_reg '),
-	# 				 ' --epi=' + ex_func,
-	# 				 ' --t1=' + T1_head,
-	# 				 ' --t1brain=' + T1_brain,
-	# 				 ' --out=' + functoT1_base,
-	# 				 ' --fmap=' + fmap,
-	# 				 ' --fmapmag' + fmapmag,
-	# 				 ' --fmapmagbrain=' + fmapmagbrain,
-	# 				 ' --echospacing=' + str(echospacing),
-	# 				 ' --pedir=' + str(pedir))
-	# else:
-	# 	epi_regopts=(os.path.join(fslbin,'epi_reg'),
-	# 				 ' --epi=' + func,
-	# 				 ' --t1=' + T1_head,
-	# 				 ' --t1brain=' + T1_brain,
-	# 				 ' --out=' + functoT1_base)
 
-	
-	# else:
-	# 	print ' '.join(epi_regopts)
-	# 	try: 
-	# 		subprocess.check_output(' '.join(epi_regopts), shell=True)	
-	# 	except :
-	# 		print 'epi_reg failed to create' + functoT1_mat
-	# 		return 1
-
-	# #T1tofunc
-	# if os.path.isfile(T1tofunc_mat):
-	# 	print 'mat file from T1 to func already exists, skipping this step'
-	# else
-	# 	if fieldmap:
-	# 		try:
-	# 	 		subprocess.check_output(' '.join([os.path.join(fslbin,'invwarp'),
-	# 				'-w ' + functoT1_warp,
-	# 				'-o ' + T1tofunc_warp,
-	# 				'-r ' + func]), shell=True,stderr=var)
-	# 		except:
-	# 			print 'invwarp failed to create ' + MNItoT1_warp
-	
 #test: BetaSeries_functions.skullstripEPI('/home/james/RestingState_dev/test/mc/mcImg.nii.gz','/home/james/RestingState_dev/data/pre_sub10_MPRAGE-1_RPI_ss.nii.gz','/home/james/RestingState_dev/reg/T1tofunc.mat')
-def skullstripEPI(func,T1_brain,T1tofunc_mat,T1tofunc_warp=None):
+def skullstripEPI(func,T1_brain=None,T1tofunc_mat=None,T1tofunc_warp=None,EPI_mask=None):
 	#T1_mask (Assumes NIFTI)
 	import os
 	import string
 	import nipype.interfaces.fsl as fsl
 	T1_mask=string.replace(T1_brain,".nii.gz","_mask.nii.gz")
-	EPI_mask=string.replace(func,".nii.gz","_mask.nii.gz")
+	#in case the user doesn'tsupplies a mask
+	if EPI_mask is None:
+		EPI_mask=string.replace(func,".nii.gz","_mask.nii.gz")
+		#make sure necessary inputs are filled in
+		if T1_brain is None or (T1tofunc_func is None and T1tofunc_warp is None):
+			print '- ERROR, either specify EPI_mask or T1_brain and (T1tofunc_mat or T1tofunc_warp)'
+			return 1
+
 	func_brain=string.replace(func,".nii.gz","_brain.nii.gz")
 	makeMask(T1_brain)
 
@@ -674,22 +639,23 @@ def skullstripEPI(func,T1_brain,T1tofunc_mat,T1tofunc_warp=None):
 	else:
   		 
   		#tApplyXfm will be deprecated, eventually make it fsl.ApplyXFM
-  		T1tofuncMask=fsl.ApplyXfm()
-  		T1tofuncMask.inputs.in_file=T1_mask
-		T1tofuncMask.inputs.out_file=EPI_mask
-		T1tofuncMask.inputs.reference=func
-		T1tofuncMask.inputs.in_matrix_file=T1tofunc_mat
-		T1tofuncMask.inputs.interp='nearestneighbour'
-		T1tofuncMask.inputs.datatype='char'
+  		if not os.path.isfile(EPI_mask):
+	  		T1tofuncMask=fsl.ApplyXfm()
+	  		T1tofuncMask.inputs.in_file=T1_mask
+			T1tofuncMask.inputs.out_file=EPI_mask
+			T1tofuncMask.inputs.reference=func
+			T1tofuncMask.inputs.in_matrix_file=T1tofunc_mat
+			T1tofuncMask.inputs.interp='nearestneighbour'
+			T1tofuncMask.inputs.datatype='char'
 
-		try:
-			T1tofuncMask.run()
-		except:
-			print 'ERROR: ' + T1tofuncMask.cmdline + "\n"
-			return 1
+			try:
+				T1tofuncMask.run()
+			except:
+				print 'ERROR: ' + T1tofuncMask.cmdline + "\n"
+				return 1
 
-		#log that ApplyWarp finished successfully
-		print 'SUCCESS: ' +  T1tofuncMask.cmdline + "\n"
+			#log that ApplyWarp finished successfully
+			print 'SUCCESS: ' +  T1tofuncMask.cmdline + "\n"
 
 
 	#make func_brain
@@ -711,6 +677,7 @@ def skullstripEPI(func,T1_brain,T1tofunc_mat,T1tofunc_warp=None):
 	#report successful outcome
 	print 'SUCCESS: skullstripEPI\n'
 	return 0
+
 
 def runICA(fslDir, inFile, outDir, melDirIn, mask, dim, TR):
 	""" This function runs MELODIC and merges the mixture modeled thresholded ICs into a single 4D nifti file

@@ -247,95 +247,92 @@ melIC_MNI =  os.path.join(ICA_AROMAoutDir,'melodic_IC_thr_MNI2mm.nii.gz')
 #end hack
 
 
-if smooth:
-	print 'Step 1) MELODIC'
-	if not os.path.isdir(ICA_AROMAoutDir):
-		os.makedirs(ICA_AROMAoutDir)
-	betafunc.runICA(fslDir, ICA_inputs.func, ICA_AROMAoutDir, melDir, ICA_inputs.func_mask, dim, TR)
 
-	print 'Step 2) Automatic classification of the components'
-	print '  - registering the spatial maps to MNI'
-	betafunc.register2MNI(fslDir, melIC, melIC_MNI, ICA_inputs.functoT1_transform, ICA_inputs.T1toMNI_transform)
+print 'Step 1) MELODIC'
+if not os.path.isdir(ICA_AROMAoutDir):
+	os.makedirs(ICA_AROMAoutDir)
+betafunc.runICA(fslDir, ICA_inputs.func_smooth, ICA_AROMAoutDir, melDir, ICA_inputs.func_mask, dim, TR)
 
-	print '  - extracting the CSF & Edge fraction features'
-	edgeFract, csfFract = betafunc.feature_spatial(fslDir, ICA_AROMAoutDir, scriptDir, melIC_MNI)
+print 'Step 2) Automatic classification of the components'
+print '  - registering the spatial maps to MNI'
+betafunc.register2MNI(fslDir, melIC, melIC_MNI, ICA_inputs.functoT1_transform, ICA_inputs.T1toMNI_transform)
 
-	print '  - extracting the Maximum RP correlation feature'
-	melmix = os.path.join(ICA_AROMAoutDir,'melodic.ica','melodic_mix')
-	maxRPcorr = betafunc.feature_time_series(melmix, ICA_inputs.mcImgPar)
+print '  - extracting the CSF & Edge fraction features'
+edgeFract, csfFract = betafunc.feature_spatial(fslDir, ICA_AROMAoutDir, scriptDir, melIC_MNI)
 
-	print '  - extracting the High-frequency content feature'
-	melFTmix = os.path.join(ICA_AROMAoutDir,'melodic.ica','melodic_FTmix')
-	HFC = betafunc.feature_frequency(melFTmix, TR)
+print '  - extracting the Maximum RP correlation feature'
+melmix = os.path.join(ICA_AROMAoutDir,'melodic.ica','melodic_mix')
+maxRPcorr = betafunc.feature_time_series(melmix, ICA_inputs.mcImgPar)
 
-	print '  - classification'
-	motionICs = betafunc.classification(ICA_AROMAoutDir, maxRPcorr, edgeFract, HFC, csfFract)
+print '  - extracting the High-frequency content feature'
+melFTmix = os.path.join(ICA_AROMAoutDir,'melodic.ica','melodic_FTmix')
+HFC = betafunc.feature_frequency(melFTmix, TR)
 
-	if (denType != 'no'):
-		print 'Step 3) Data denoising'
-		betafunc.denoising(fslDir, ICA_inputs.func, ICA_AROMAoutDir, melmix, denType, motionICs)
+print '  - classification'
+motionICs = betafunc.classification(ICA_AROMAoutDir, maxRPcorr, edgeFract, HFC, csfFract)
 
-	# Remove thresholded melodic_IC file
-	os.remove(melIC)
-
-	# Revert to old directory
-	os.chdir(cwd)
-
-	denoised_func=os.path.join(ICA_AROMAoutDir,'denoised_func_data_nonaggr.nii.gz')
-	print '\n----------------------------------- Finished -----------------------------------\n'
-else:
-
-	#no smoothing was ran, so no ICA_AROMA was ran, presumed it was already ran
-	#extract the IC's that are associated with motion
-	print '  - extracting the CSF & Edge fraction features'
-	edgeFract, csfFract = betafunc.feature_spatial(fslDir, ICA_AROMAoutDir, scriptDir, melIC_MNI)
-
-	print '  - extracting the Maximum RP correlation feature'
-	melmix = os.path.join(ICA_AROMAoutDir,'melodic.ica','melodic_mix')
-	maxRPcorr = betafunc.feature_time_series(melmix, ICA_inputs.mcImgPar)
-
-	print '  - extracting the High-frequency content feature'
-	melFTmix = os.path.join(ICA_AROMAoutDir,'melodic.ica','melodic_FTmix')
-	HFC = betafunc.feature_frequency(melFTmix, TR)
-
-	print '  - classification'
-	motionICs = betafunc.classification(ICA_AROMAoutDir, maxRPcorr, edgeFract, HFC, csfFract)
-	ICA_AROMA_ns_outDir=os.path.join(outDir,"ICA_AROMA_no_smooth")
+if (denType != 'no'):
 	print 'Step 3) Data denoising'
-	betafunc.denoising(fslDir, ICA_inputs.func, ICA_AROMA_ns_outDir, melmix, denType, motionICs)
+	print 'denoising smoothed data'
+	betafunc.denoising(fslDir, ICA_inputs.func_smooth, ICA_AROMAoutDir, melmix, denType, motionICs)
+	denoised_func=os.path.join(ICA_AROMAoutDir,'denoised_func_data_nonaggr.nii.gz')
+	denoised_func_smooth=denoised_func.replace('.nii.gz','_smooth.nii.gz')
+	os.rename(denoised_func,denoised_func_smooth)
 
-	denoised_func=os.path.join(ICA_AROMA_ns_outDir,'denoised_func_data_nonaggr.nii.gz')
+	print 'denoising unsmoothed data'
+	betafunc.denoising(fslDir, ICA_inputs.func_nosmooth, ICA_AROMAoutDir, melmix, denType, motionICs)
+	denoised_func_nosmooth=denoised_func.replace('.nii.gz','_nosmooth.nii.gz')
+	os.rename(denoised_func,denoised_func_nosmooth)
+# Remove thresholded melodic_IC file
+os.remove(melIC)
 
-	print '\n----------------------------------- Finished -----------------------------------\n'
+# Revert to old directory
+os.chdir(cwd)
+
+print '\n----------------------------------- Finished -----------------------------------\n'
 #---------------------------------------- Post ICA-AROMA ----------------------------------------#
 #denoised_func will be used from here for post ICA processing
 #temporally filter the data
 Temp_FiltoutDir=os.path.join(outDir,'Temperal_filter')
 if not os.path.isdir(Temp_FiltoutDir):
 	os.makedirs(Temp_FiltoutDir)
-Temp_Filt_Func = betafunc.TemporalFilter(denoised_func,Temp_FiltoutDir)
+Temp_Filt_Func = betafunc.TemporalFilter(denoised_func_nosmooth,Temp_FiltoutDir)
 
 #Complete nuisance regression on the data
-seedname=os.path.basename(seed).replace('.nii.gz','')
-Nuis_reg=os.path.join(outDir,'Nuisance_Regression_%s' % (seedname))
-if not os.path.isdir(Nuis_reg):
-	os.makedirs(Nuis_reg)
-NuisanceReg_func = betafunc.NuisanceRegression(Temp_Filt_Func,nrois,ICA_Inputs.MNItofunc_warp,Nuis_reg,motion=False)
+#Seeds is a list of seed regions
+#Nrois multiple txt files with each containing nrois for that seed.
+for seed,Nroi in zip(Seeds,Nrois):
+	seedname=os.path.basename(seed).replace('.nii.gz','')
+	Nuis_reg=os.path.join(outDir,'Nuisance_Regression_%s' % (seedname))
+	if not os.path.isdir(Nuis_reg):
+		os.makedirs(Nuis_reg)
+	NuisanceReg_func = betafunc.NuisanceRegression(Temp_Filt_Func,Nrois,ICA_inputs.MNItofunc_warp,Nuis_reg,motion=False)
 
-#complete betaseries prep on the data
-Prep_BetaSeries=os.path.join(outDir,'Prep_BetaSeries')
-if not os.path.isdir(Prep_BetaSeries):
-	os.makedirs(Prep_BetaSeries)
-betafunc.MakeModel(NuisanceReg_func,EVs,Prep_BetaSeries)
+	#complete betaseries prep on the data
+	Run_BetaSeries=os.path.join(outDir,'BetaSeries_%s' % (seedname))
+	if not os.path.isdir(Prep_BetaSeries):
+		os.makedirs(Prep_BetaSeries)
+	betafunc.MakeModel(NuisanceReg_func,EVs,Run_BetaSeries)
 
-#run betaseries
-#hack from time crunch
-whichEVs=[1, 2, 3]
-numrealev=4
-tempderiv='-tempderiv'
-#end hack
+	#run betaseries
+	#hack from time crunch
+	whichEVs=[1, 2, 3]
+	numrealev=4
+	tempderiv='-tempderiv'
+	#end hack
+	func_data=os.path.join(Run_BetaSeries,'filtered_func_data.nii.gz')
+	mask=os.path.join(Run_BetaSeries,'mask.nii.gz')
+	if not os.path.islink(func_data):
+		os.symlink(NuisanceReg_func,func_data)
+	if not os.path.islink(mask):
+		os.symlink(ICA_inputs.func_mask,mask)
+	#run the betaseries (which expects func and mask in the appropiate place)
+	betafunc.BetaSeries(Run_BetaSeries,whichEVs,numrealev,tempderiv)
 
-betafunc.BetaSeries(Prep_BetaSeries,whichEVs,numrealev,tempderiv=None)
-
+	#Extract seed for each ev and run the correlation
+	for ev in whichEVs:
+		EVLSS=os.path.join(Run_BetaSeries,'betaseries/ev%s_LSS.nii.gz' % (ev))
+		Seed_Outdir=os.path.join(outDir,"/Results/%s" % (seedname))
+		betafunc.SeedCorrelate(EVLSS,seed,Seed_Outdir)
 
 #next step. Use seed regions to do correlations

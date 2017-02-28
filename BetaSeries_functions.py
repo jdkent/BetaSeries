@@ -785,7 +785,7 @@ def PreICA(outDir,func,T1_brain,T1_head,fmap=None,fmapmag=None,fmapmagbrain=None
 
 
 	os.chdir(currentdir)
-	outputs=namedtuple("outfiles", ["func","functoT1_transform","T1toMNI_transform","func_mask","mcImgPar","MNItofunc_warp","functoMNI_warp"])
+	outputs=namedtuple("outfiles", ["func_smooth","func_nosmooth","functoT1_transform","T1toMNI_transform","func_mask","mcImgPar","MNItofunc_warp","functoMNI_warp"])
 	return outputs(PreICAOut,GTOutputs.functoT1_transform,GTOutputs.T1toMNI_transform,SSmcImgOutputs.func_mask,MCOutputs.mcImgPar,GTOutputs.MNItofunc_warp,GTOutputs.functoMNI_warp)
 
 #test: BetaSeries_functions.PreICA('/home/james/RestingState_dev/testout1','/home/james/RestingState_dev/data/pre_sub10_REST_RPI.nii.gz','/home/james/RestingState_dev/data/pre_sub10_MPRAGE-1_RPI_ss.nii.gz','/home/james/RestingState_dev/data/pre_sub10_MPRAGE-1_RPI.nii.gz')
@@ -1353,7 +1353,8 @@ def TemporalFilter(denoised_func,outDir):
 	if not os.path.isdir(outDir):
 		os.makedirs(outDir)
 	os.chdir(outDir)
-	Tempfilt_output=string.replace(denoised_func,'.nii.gz','_temp_filt.nii.gz')
+	Tempfilt_name=os.path.basename(denoised_func).replace('.nii.gz','_temp_filt.nii.gz')
+	Tempfilt_output=os.path.join(outDir,Tempfilt_name)
 
 	#highpass calculated from TR=2.0 seconds
 	TemporalFilterCmd=fsl.TemporalFilter(in_file=denoised_func,highpass_sigma=25.0,out_file=Tempfilt_output)
@@ -1373,13 +1374,15 @@ def NuisanceRegression(filtered_func,Nrois,MNItofuncWarp,outdir,motion=False):
 	os.chdir(outdir)
 	#read the nuisance rois txt file
 	with open(Nrois,'r') as txt:
-		nrois=read().strip().split('\n')
+		nrois=txt.read().strip().split('\n')
 	#initialize overall numpy array
 	func=nib.load(filtered_func)
 	length_ts=func.shape[3]
 	num_nrois=len(nrois)
-	np.empty(shape(num_nrois,length_ts))
+	#np.empty([num_nrois,length_ts])
 
+	nrois_norm_ts_tot=os.path.join(outdir,'nrois_norm_ts.txt')
+	nrois_norm_ts_mat=os.path.join(outdir,'nrois_norm_ts.mat')
 	NuisanceReg_func=os.path.join(outdir,'NuisanceReg.nii.gz')
 	for index,nroi in enumerate(nrois,start=0):
 		basenroi=os.path.basename(nroi)
@@ -1387,10 +1390,10 @@ def NuisanceRegression(filtered_func,Nrois,MNItofuncWarp,outdir,motion=False):
 		nroi_ts=string.replace(subnroi,'.nii.gz','_ts.txt')
 		nroi_bin=string.replace(subnroi,'.nii.gz','_bin.nii.gz')
 		nroi_norm_ts=string.replace(subnroi,'.nii.gz','_norm_ts.txt')
-		nrois_norm_ts_tot=string.replace(subnroi,'.nii.gz','_norm_ts_tot.txt')
-		nrois_norm_ts_mat=string.replace(subnroi,'.nii.gz','_norm_ts_tot.mat')
+		#nrois_norm_ts_tot=string.replace(subnroi,'.nii.gz','_norm_ts_tot.txt')
+		#nrois_norm_ts_mat=string.replace(subnroi,'.nii.gz','_norm_ts_tot.mat')
 		#move nroi to subject space
-		stdnroi2subnroi=fsl.ApplyWarp(in_file=nroi,out_file=subnroi,ref_file=Tempfilt_func,field_file=MNItofuncWarp)
+		stdnroi2subnroi=fsl.ApplyWarp(in_file=nroi,out_file=subnroi,ref_file=filtered_func,field_file=MNItofuncWarp)
 		stdnroi2subnroi.run()
 
 		#binarize mask
@@ -1402,7 +1405,7 @@ def NuisanceRegression(filtered_func,Nrois,MNItofuncWarp,outdir,motion=False):
 		ts_extraction.run()
 
 		#read in the ts file
-		ts_arr=loadtxt(nroi_ts)
+		ts_arr=np.loadtxt(nroi_ts)
 
 		#norm the array
 		ts_norm=(ts_arr - ts_arr.mean()) / ts_arr.std()
@@ -1442,8 +1445,8 @@ def BetaSeries(outdir,whichEVs,numrealev,tempderiv=None):
 	import string
 	import nipype.interfaces.fsl as fsl
 	import subprocess
-
-	subprocess.check_output("pybetaseries.py --fsldir %s --whichevs %s --numrealev %s %s -LSS") % (outdir,str(whichEVs).strip('[]').replace(',',''),numrealev,tempderiv)
+	#tmp addition directory of pybetaseries
+	subprocess.check_output("/home/james/dev/pybetaseries/pybetaseries.py --fsldir %s --whichevs %s --numrealev %s %s -LSS" % (outdir,str(whichEVs).strip('[]').replace(',',''),numrealev,tempderiv),shell=True)
 	print "BetaSeries Successful!"
 	
 def MakeModel(func,EVs,outDir):
@@ -1455,7 +1458,7 @@ def MakeModel(func,EVs,outDir):
 	import shutil
 	#ugg: I dislike changing directories for the sake of output!!!
 	currentdir=os.getcwd()
-	outDir=os.path.dirname(func)
+	#outDir=os.path.dirname(func)
 	design_fsf=os.path.join(outDir,'design.fsf')
 	design_mat=os.path.join(outDir,'design.mat')
 
@@ -1493,6 +1496,82 @@ def MakeModel(func,EVs,outDir):
 	os.rename(design_res.outputs.design_file,design_mat)
 
 	os.chdir(currentdir)
+
+
+def NuisanceRegression(filtered_func,Nrois,MNItofuncWarp,outdir,motion=False):
+	import os
+	import string
+	import nipype.interfaces.fsl as fsl
+	import numpy as np
+	import nibabel as nib
+	#get the current directory:
+	currentdir=os.getcwd()
+	#go the outdir to make sure "intermediary" files are dropped off in the same place as "final" files
+	os.chdir(outdir)
+	#read the nuisance rois txt file
+	with open(Nrois,'r') as txt:
+		nrois=txt.read().strip().split('\n')
+	#initialize overall numpy array
+	func=nib.load(filtered_func)
+	length_ts=func.shape[3]
+	num_nrois=len(nrois)
+	#np.empty([num_nrois,length_ts])
+
+	nrois_norm_ts_tot=os.path.join(outdir,'nrois_norm_ts.txt')
+	nrois_norm_ts_mat=os.path.join(outdir,'nrois_norm_ts.mat')
+	NuisanceReg_func=os.path.join(outdir,'NuisanceReg.nii.gz')
+	for index,nroi in enumerate(nrois,start=0):
+		basenroi=os.path.basename(nroi)
+		subnroi=os.path.join(outdir,basenroi)
+		nroi_ts=string.replace(subnroi,'.nii.gz','_ts.txt')
+		nroi_bin=string.replace(subnroi,'.nii.gz','_bin.nii.gz')
+		nroi_norm_ts=string.replace(subnroi,'.nii.gz','_norm_ts.txt')
+		#nrois_norm_ts_tot=string.replace(subnroi,'.nii.gz','_norm_ts_tot.txt')
+		#nrois_norm_ts_mat=string.replace(subnroi,'.nii.gz','_norm_ts_tot.mat')
+		#move nroi to subject space
+		stdnroi2subnroi=fsl.ApplyWarp(in_file=nroi,out_file=subnroi,ref_file=filtered_func,field_file=MNItofuncWarp)
+		stdnroi2subnroi.run()
+
+		#binarize mask
+		nroiBinCmd=fsl.ImageMaths(in_file=subnroi,out_file=nroi_bin,op_string='-thr 0.5 -bin')
+		nroiBinCmd.run()
+		
+		#extract the time series from the mask
+		ts_extraction=fsl.ImageMeants(in_file=filtered_func,mask=nroi_bin,out_file=nroi_ts)
+		ts_extraction.run()
+
+		#read in the ts file
+		ts_arr=np.loadtxt(nroi_ts)
+
+		#norm the array
+		ts_norm=(ts_arr - ts_arr.mean()) / ts_arr.std()
+		
+		#write normed array to file
+		np.savetxt(nroi_norm_ts,ts_norm,'%3.10f')
+
+		#save in larger array
+		if index == 0:
+			ts_norm_tot=ts_norm
+		else:
+			ts_norm_tot=np.column_stack((ts_norm_tot,ts_norm))
+
+	#print out the total array to a file
+	np.savetxt(nrois_norm_ts_tot,ts_norm_tot,'%3.10f')
+
+	#transfer the text file to be readable by fsl
+	os.system('Text2Vest %s %s' % (nrois_norm_ts_tot,nrois_norm_ts_mat))
+
+	#return the normed list (for use to apply the regres,sion)
+	normed_list=[string.replace(nroi,'.nii.gz','_norm_ts.txt') for nroi in nrois]
+
+	#perform nuisance regression
+	nuisanceGLM=fsl.GLM(in_file=filtered_func,design=nrois_norm_ts_mat,out_res_name=NuisanceReg_func)
+	nuisanceGLM.run()
+
+	#go back to the original directory
+	os.chdir(currentdir)
+
+	return NuisanceReg_func
 #Notes:
 #Don't do prewhitening for a seed based analysis?
 #https://www.jiscmail.ac.uk/cgi-bin/webadmin?A2=ind1203&L=fsl&D=0&P=300924

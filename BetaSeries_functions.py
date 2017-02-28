@@ -11,9 +11,15 @@ def getmiddlevolume(func):
 def makeMask(image):
 	#binarizes a 3d volume
 	import os
+	import collections
 	import nipype.interfaces.fsl as fsl
 	import string
 	#Name the output (NIFTI)
+	currentdir=os.getcwd()
+	outdir=os.path.dirname(image)
+
+	os.chdir(outdir)
+
 	MaskFile=string.replace(image,".nii.gz","_mask.nii.gz")
 
 	#set up the command
@@ -25,16 +31,19 @@ def makeMask(image):
 	try:
 		MaskCmd.run()
 	except:
+		os.chdir(currentdir)
 		print 'ERROR: ' + MaskCmd.cmdline + '\n'
 		return 1
 
 	print 'SUCCESS: ' + MaskCmd.cmdline + '\n'
-	return 0
+	os.chdir(currentdir)
+	return MaskFile
 
 
 def MotionCorrect(func,outDir):
 	import os
 	import subprocess
+	from collections import namedtuple
 	try:
 		import nipype.interfaces.fsl as fsl
 		import nipype.interfaces.afni as afni
@@ -65,6 +74,8 @@ def MotionCorrect(func,outDir):
 	############# Set up OutDir and Log file ###########
 	if not os.path.exists(outDir):
 		os.makedirs(outDir)
+	currentdir=os.getcwd()
+	os.chdir(outDir)
 	#################################################################
 	#logfile
 	MCLogFile=os.path.join(outDir,'mc.log')
@@ -259,16 +270,19 @@ def MotionCorrect(func,outDir):
 	RelPlot_Result=RelPlot.run()
 
 	#write finished imformation to log and close log.
-	msg="SUCCESS: MotionCorrection"
+	msg="SUCCESS: MotionCorrect"
 	print msg
 	MCLog.write(msg)
 	MCLog.close()
 
+	os.chdir(currentdir)
+
 	#return success
-	return 0
+	outputs = namedtuple("outfiles", ["mcImg","mcImgMean","mcImgPar"])
+	return outputs(mcImg,mcImgMean,mcImgPar)
 
 # Functions for ICA-AROMA v0.3 beta
-def GenTransforms(fslstandards,outDir,ex_func,T1_brain,T1_head,fmap=None,fmapmag=None,fmapmagbrain=None,echospacing=None,pedir=None):
+def GenTransforms(outDir,ex_func,T1_brain,T1_head,fmap=None,fmapmag=None,fmapmagbrain=None,echospacing=None,pedir=None):
 	"""################
 	   #function: GenTransforms
 	   ################
@@ -300,6 +314,7 @@ def GenTransforms(fslstandards,outDir,ex_func,T1_brain,T1_head,fmap=None,fmapmag
 	# Import needed modules
 	import os
 	import string
+	from collections import namedtuple
 	try:
 		import nipype.interfaces.fsl as fsl
 	except:
@@ -309,6 +324,8 @@ def GenTransforms(fslstandards,outDir,ex_func,T1_brain,T1_head,fmap=None,fmapmag
 	############# Set up OutDir and Log file ###########
 	if not os.path.exists(outDir):
 		os.makedirs(outDir)
+	currentdir=os.getcwd()
+	os.chdir(outDir)
 	#################################################################
 	#logfile
 	RegLogFile=os.path.join(outDir,'reg.log')
@@ -325,6 +342,7 @@ def GenTransforms(fslstandards,outDir,ex_func,T1_brain,T1_head,fmap=None,fmapmag
 
 	#fsl MNI files (ubuntu installation)
 	#fslstandards=os.path.join(fslDir,'data/standard/')
+	fslstandards=os.path.join(os.environ['FSLDIR'],'data/standard')
 
 	# Define output files
 	#T1 to MNI
@@ -590,35 +608,98 @@ def GenTransforms(fslstandards,outDir,ex_func,T1_brain,T1_head,fmap=None,fmapmag
 
 	#finish the function	
 	msg='SUCCESS: GetTransforms\n'
+	os.chdir(currentdir)
 	print msg
 	RegLog.write(msg)
-	return 0
+
+	os.chdir(currentdir)
+
+	outputs = namedtuple("outfiles", ["T1tofunc_transform","functoT1_transform","T1toMNI_transform","MNItoT1_transform","MNItofunc_warp","functoMNI_warp"])
+	if fieldmap:
+		return outputs(T1tofunc_warp,functoT1_warp,T1toMNI_warp,MNItoT1_warp,MNItofunc_warp,functoMNI_warp)
+	else:
+		return outputs(T1tofunc_mat,functoT1_mat,T1toMNI_warp,MNItoT1_warp,MNItofunc_warp,functoMNI_warp)
 
 #idk about the inputs, I think this way minimizes the processing?
-def Spatial_Smooth(func_brain,func_mask,func_mean):
+def Spatial_Smooth(func_brain,func_mask,func_mean,outDir):
+	import nipype.interfaces.fsl as fsl
+	import string
+	from collections import namedtuple
+	import os
+	#currentdir
+	currentdir=os.getcwd()
+	#outdir
+	os.chdir(outDir)
 	#func is motion corrected and stripped.	
 	#mean=$(fslstats ${mean_func} -k ${mask} -p 50)
 	#brightness threshold=mean*.75
 	#susan $1 ${brightness_threshold} 2.5 3 1 1 ${mean_func} ${brightness_threshold} ${smoothName}
+	#http://nipype.readthedocs.io/en/latest/interfaces/generated/nipype.interfaces.fsl.preprocess.html
+	smooth_out=os.path.join(outDir,"func_smooth.nii.gz")
+	meanCmd=fsl.ImageStats(in_file=func_mean,op_string='-k %s -p 50' % func_mask)
 
+	#derive brightness threshold (determined by featlib.tcl)
+	try:	
+		threshold=meanCmd.run().outputs.out_stat*.75
+	except:
+		print '- ERROR, could not determine threshold for spatial smoothing'
+		return 1
+
+	#run spatial smoothing on the data using fsl's SUSAN
+   	spatialSmoothCmd=fsl.SUSAN(brightness_threshold=threshold,fwhm=2.5,in_file=func_brain,dimension=3,usans=[(func_mean,threshold)],out_file=smooth_out)
+   	try:
+   		spatialSmoothCmd.run()
+   	except:
+   		print '- ERROR, could not run ' + spatialSmoothCmd.cmdline
+
+   	#print success
+   	print '- SUCCESS Spatial_Smooth: %s\n%s' % (meanCmd.cmdline, spatialSmoothCmd.cmdline)
+ 	os.chdir(currentdir)
+   	outputs = namedtuple("outfiles", ["smoothed_output"])
+   	return outputs(smooth_out)
 
 #test: BetaSeries_functions.skullstripEPI('/home/james/RestingState_dev/test/mc/mcImg.nii.gz','/home/james/RestingState_dev/data/pre_sub10_MPRAGE-1_RPI_ss.nii.gz','/home/james/RestingState_dev/reg/T1tofunc.mat')
-def skullstripEPI(func,T1_brain=None,T1tofunc_mat=None,T1tofunc_warp=None,EPI_mask=None):
+def skullstripEPI(func,T1_brain=None,T1tofunc_transform=None,EPI_mask=None):
 	#T1_mask (Assumes NIFTI)
 	import os
 	import string
+	from collections import namedtuple
 	import nipype.interfaces.fsl as fsl
-	T1_mask=string.replace(T1_brain,".nii.gz","_mask.nii.gz")
+
+	#current directory
+	currentdir=os.getcwd()
+	#outdir
+	outDir=os.path.dirname(func)
+	#change directory
+	os.chdir(outDir)
+
+	#check transform
+	if T1tofunc_transform is not None:
+		transform_type=os.path.basename(T1tofunc_transform)
+	else:
+		transform_type=None
+		
+	if transform_type is not None and '.mat' in transform_type:
+		T1tofunc_mat=T1tofunc_transform
+		T1tofunc_warp=None
+	elif transform_type is not None and '.nii.gz' in transform_type:
+		T1tofunc_mat=None
+		T1tofunc_warp=T1tofunc_transform
+	else:
+		T1tofunc_mat=None
+		T1tofunc_warp=None
+	#T1_mask=string.replace(T1_brain,".nii.gz","_mask.nii.gz")
 	#in case the user doesn'tsupplies a mask
 	if EPI_mask is None:
 		EPI_mask=string.replace(func,".nii.gz","_mask.nii.gz")
 		#make sure necessary inputs are filled in
-		if T1_brain is None or (T1tofunc_func is None and T1tofunc_warp is None):
+		if T1_brain is None or (T1tofunc_mat is None and T1tofunc_warp is None):
 			print '- ERROR, either specify EPI_mask or T1_brain and (T1tofunc_mat or T1tofunc_warp)'
 			return 1
-
+	#output image
 	func_brain=string.replace(func,".nii.gz","_brain.nii.gz")
-	makeMask(T1_brain)
+	if T1_brain is not None:
+		T1_mask=makeMask(T1_brain)
 
 	if T1tofunc_warp is not None and os.path.isfile(T1tofunc_warp):
 		T1tofuncMask=fsl.ApplyWarp()
@@ -676,8 +757,38 @@ def skullstripEPI(func,T1_brain=None,T1tofunc_mat=None,T1tofunc_warp=None,EPI_ma
 
 	#report successful outcome
 	print 'SUCCESS: skullstripEPI\n'
-	return 0
+	os.chdir(currentdir)
+	outputs=namedtuple("outfiles", ["func_mask","func_brain"])
+	return outputs(EPI_mask,func_brain)
 
+
+#GenTransforms(outDir,ex_func,T1_brain,T1_head,fmap=None,fmapmag=None,fmapmagbrain=None,echospacing=None,pedir=None):
+#get rid of fslstandard: use os.environ['FSLDIR'], if this fails exit script
+def PreICA(outDir,func,T1_brain,T1_head,fmap=None,fmapmag=None,fmapmagbrain=None,echospacing=None,pedir=None,smooth=True):
+	import os
+	from collections import namedtuple
+	#current directory
+	currentdir=os.getcwd()
+	os.chdir(outDir)
+	MCOutputs=MotionCorrect(func=func,outDir=os.path.join(outDir,'mc'))
+	GTOutputs=GenTransforms(outDir=os.path.join(outDir,'reg'),ex_func=MCOutputs.mcImgMean,T1_brain=T1_brain,T1_head=T1_head,fmap=fmap,fmapmag=fmapmag,fmapmagbrain=fmapmagbrain,echospacing=echospacing,pedir=pedir)
+	SSmcImgOutputs=skullstripEPI(func=MCOutputs.mcImg,T1_brain=T1_brain,T1tofunc_transform=GTOutputs.T1tofunc_transform,EPI_mask=None)
+	SSmcImgMeanOutputs=skullstripEPI(func=MCOutputs.mcImgMean,T1_brain=None,T1tofunc_transform=None,EPI_mask=SSmcImgOutputs.func_mask)
+	if smooth:
+		smoothDir=os.path.join(outDir,'smooth')
+		if not os.path.isdir(smoothDir):
+			os.makedirs(smoothDir)
+		SpatialSmoothOutputs=Spatial_Smooth(func_brain=SSmcImgOutputs.func_brain,func_mask=SSmcImgOutputs.func_mask,func_mean=SSmcImgMeanOutputs.func_brain,outDir=smoothDir)
+		PreICAOut=SpatialSmoothOutputs.smoothed_output
+	else:
+		PreICAOut=SSmcImgOutputs.func_brain
+
+
+	os.chdir(currentdir)
+	outputs=namedtuple("outfiles", ["func","functoT1_transform","T1toMNI_transform","func_mask","mcImgPar","MNItofunc_warp","functoMNI_warp"])
+	return outputs(PreICAOut,GTOutputs.functoT1_transform,GTOutputs.T1toMNI_transform,SSmcImgOutputs.func_mask,MCOutputs.mcImgPar,GTOutputs.MNItofunc_warp,GTOutputs.functoMNI_warp)
+
+#test: BetaSeries_functions.PreICA('/home/james/RestingState_dev/testout1','/home/james/RestingState_dev/data/pre_sub10_REST_RPI.nii.gz','/home/james/RestingState_dev/data/pre_sub10_MPRAGE-1_RPI_ss.nii.gz','/home/james/RestingState_dev/data/pre_sub10_MPRAGE-1_RPI.nii.gz')
 
 def runICA(fslDir, inFile, outDir, melDirIn, mask, dim, TR):
 	""" This function runs MELODIC and merges the mixture modeled thresholded ICs into a single 4D nifti file
@@ -969,8 +1080,10 @@ def feature_frequency(melFTmix, TR):
 	# Load melodic_FTmix file
 	FT=np.loadtxt(melFTmix)
 
+
 	# Determine which frequencies are associated with every row in the melodic_FTmix file  (assuming the rows range from 0Hz to Nyquist)
 	f = Ny*(np.array(range(1,FT.shape[0]+1)))/(FT.shape[0])
+
 
 	# Only include frequencies higher than 0.01Hz
 	fincl = np.squeeze(np.array(np.where( f > 0.01 )))
@@ -1006,12 +1119,14 @@ def feature_spatial(fslDir, tempDir, aromaDir, melIC):
 	---------------------------------------------------------------------------------
 	edgeFract:	Array of the edge fraction feature scores for the components of the melIC file
 	csfFract:	Array of the CSF fraction feature scores for the components of the melIC file"""
-
+	
 	# Import required modules
 	import numpy as np
 	import os
 	import commands
 
+	currentdir=os.getcwd()
+	os.chdir(aromaDir)
 	# Get the number of ICs
 	numICs = int(commands.getoutput('%sfslinfo %s | grep dim4 | head -n1 | awk \'{print $2}\'' % (fslDir, melIC) ))
 
@@ -1106,7 +1221,7 @@ def feature_spatial(fslDir, tempDir, aromaDir, melIC):
 
 	# Remove the temporary IC-file
 	os.remove(tempIC)
-
+	os.chdir(currentdir)
 	# Return feature scores
 	return edgeFract, csfFract
 
@@ -1225,3 +1340,159 @@ def denoising(fslDir, inFile, outDir, melmix, denType, denIdx):
 #test:  BetaSeries_functions.GenTransforms('/usr/share/fsl/5.0/','/home/james/RestingState_dev/','/home/james/RestingState_dev/data/pre_sub10_REST_RPI.nii.gz','/home/james/RestingState_dev/data/pre_sub10_MPRAGE-1_RPI_ss.nii.gz','/home/james/RestingState_dev/data/pre_sub10_MPRAGE-1_RPI.nii.gz')
 
 # BetaSeries_functions.GenTransforms('/usr/share/fsl/data/standard/','/home/james/RestingState_dev/reg','/home/james/RestingState_dev/test/mc/mcImgmean.nii.gz','/home/james/RestingState_dev/data/pre_sub10_MPRAGE-1_RPI_ss.nii.gz','/home/james/RestingState_dev/data/pre_sub10_MPRAGE-1_RPI.nii.gz')
+
+
+##Post ICA
+def TemporalFilter(denoised_func,outDir):
+	import os
+	import string
+	import nipype.interfaces.fsl as fsl
+	currentdir=os.getcwd()
+	
+	#go to outdir
+	if not os.path.isdir(outDir):
+		os.makedirs(outDir)
+	os.chdir(outDir)
+	Tempfilt_output=string.replace(denoised_func,'.nii.gz','_temp_filt.nii.gz')
+
+	#highpass calculated from TR=2.0 seconds
+	TemporalFilterCmd=fsl.TemporalFilter(in_file=denoised_func,highpass_sigma=25.0,out_file=Tempfilt_output)
+	TemporalFilterCmd.run()
+	os.chdir(currentdir)
+	return Tempfilt_output
+
+def NuisanceRegression(filtered_func,Nrois,MNItofuncWarp,outdir,motion=False):
+	import os
+	import string
+	import nipype.interfaces.fsl as fsl
+	import numpy as np
+	import nibabel as nib
+	#get the current directory:
+	currentdir=os.getcwd()
+	#go the outdir to make sure "intermediary" files are dropped off in the same place as "final" files
+	os.chdir(outdir)
+	#read the nuisance rois txt file
+	with open(Nrois,'r') as txt:
+		nrois=read().strip().split('\n')
+	#initialize overall numpy array
+	func=nib.load(filtered_func)
+	length_ts=func.shape[3]
+	num_nrois=len(nrois)
+	np.empty(shape(num_nrois,length_ts))
+
+	NuisanceReg_func=os.path.join(outdir,'NuisanceReg.nii.gz')
+	for index,nroi in enumerate(nrois,start=0):
+		basenroi=os.path.basename(nroi)
+		subnroi=os.path.join(outdir,basenroi)
+		nroi_ts=string.replace(subnroi,'.nii.gz','_ts.txt')
+		nroi_bin=string.replace(subnroi,'.nii.gz','_bin.nii.gz')
+		nroi_norm_ts=string.replace(subnroi,'.nii.gz','_norm_ts.txt')
+		nrois_norm_ts_tot=string.replace(subnroi,'.nii.gz','_norm_ts_tot.txt')
+		nrois_norm_ts_mat=string.replace(subnroi,'.nii.gz','_norm_ts_tot.mat')
+		#move nroi to subject space
+		stdnroi2subnroi=fsl.ApplyWarp(in_file=nroi,out_file=subnroi,ref_file=Tempfilt_func,field_file=MNItofuncWarp)
+		stdnroi2subnroi.run()
+
+		#binarize mask
+		nroiBinCmd=fsl.ImageMaths(in_file=subnroi,out_file=nroi_bin,op_string='-thr 0.5 -bin')
+		nroiBinCmd.run()
+		
+		#extract the time series from the mask
+		ts_extraction=fsl.ImageMeants(in_file=filtered_func,mask=nroi_bin,out_file=nroi_ts)
+		ts_extraction.run()
+
+		#read in the ts file
+		ts_arr=loadtxt(nroi_ts)
+
+		#norm the array
+		ts_norm=(ts_arr - ts_arr.mean()) / ts_arr.std()
+		
+		#write normed array to file
+		np.savetxt(nroi_norm_ts,ts_norm,'%3.10f')
+
+		#save in larger array
+		if index == 0:
+			ts_norm_tot=ts_norm
+		else:
+			ts_norm_tot=np.column_stack((ts_norm_tot,ts_norm))
+
+	#print out the total array to a file
+	np.savetxt(nrois_norm_ts_tot,ts_norm_tot,'%3.10f')
+
+	#transfer the text file to be readable by fsl
+	os.system('Text2Vest %s %s' % (nrois_norm_ts_tot,nrois_norm_ts_mat))
+
+	#return the normed list (for use to apply the regres,sion)
+	normed_list=[string.replace(nroi,'.nii.gz','_norm_ts.txt') for nroi in nrois]
+
+	#perform nuisance regression
+	nuisanceGLM=fsl.GLM(in_file=filtered_func,design=nrois_norm_ts_mat,out_res_name=NuisanceReg_func)
+	nuisanceGLM.run()
+
+	#go back to the original directory
+	os.chdir(currentdir)
+
+	return NuisanceReg_func
+
+def BetaSeries(outdir,whichEVs,numrealev,tempderiv=None):
+	#assumes the requisite files exist in an fsl "friendly" way
+	#use symlinks in the main script to connect the images
+	#i.e. mask.nii.gz, filtered_func_data.nii.gz, and custom_timing_files exist
+	import os
+	import string
+	import nipype.interfaces.fsl as fsl
+	import subprocess
+
+	subprocess.check_output("pybetaseries.py --fsldir %s --whichevs %s --numrealev %s %s -LSS") % (outdir,str(whichEVs).strip('[]').replace(',',''),numrealev,tempderiv)
+	print "BetaSeries Successful!"
+	
+def MakeModel(func,EVs,outDir):
+	#notes: need to make the outdir have design.mat and folder "custom_timing_files with properly named evs inside"
+	#so clean up the evs in the main script before calling this function
+	import os
+	import nipype.algorithms.modelgen as modelgen
+	import nipype.interfaces.fsl.model as model
+	import shutil
+	#ugg: I dislike changing directories for the sake of output!!!
+	currentdir=os.getcwd()
+	outDir=os.path.dirname(func)
+	design_fsf=os.path.join(outDir,'design.fsf')
+	design_mat=os.path.join(outDir,'design.mat')
+
+	EVDir=os.path.join(outDir,'custom_timing_files')
+	if not os.path.isdir(EVDir):
+		os.makedirs(EVDir)
+	for index,EV in enumerate(EVs,start=1):
+		EVoutfile=os.path.join(EVDir,'ev%s.txt' % (index))
+		shutil.copyfile(EV,EVoutfile)
+
+
+	os.chdir(outDir)
+	ModelSpec=modelgen.SpecifyModel()
+	ModelSpec.inputs.event_files=EVs #a list of 3-column txt files
+	ModelSpec.inputs.functional_runs=func #the preprocessed functional volume
+	ModelSpec.inputs.high_pass_filter_cutoff=100 #make this user changable?
+	ModelSpec.inputs.input_units='secs'
+	ModelSpec.inputs.time_repetition=2 #change this to read from the data?
+	subinfo=ModelSpec.run()
+
+	FirstLevel=model.Level1Design()
+	FirstLevel.inputs.interscan_interval=2
+	FirstLevel.inputs.bases={'dgamma':{'derivs':True}}
+	FirstLevel.inputs.session_info=subinfo.outputs.session_info
+	FirstLevel.inputs.model_serial_correlations=True
+	fsf_res=FirstLevel.run()
+
+	FEAT=model.FEATModel()
+	FEAT.inputs.ev_files=EVs
+	FEAT.inputs.fsf_file=fsf_res.outputs.fsf_files
+	design_res=FEAT.run() #get the design file for pybetaseries
+
+	#rename the files for pybetaseries
+	os.rename(fsf_res.outputs.fsf_files,design_fsf)
+	os.rename(design_res.outputs.design_file,design_mat)
+
+	os.chdir(currentdir)
+#Notes:
+#Don't do prewhitening for a seed based analysis?
+#https://www.jiscmail.ac.uk/cgi-bin/webadmin?A2=ind1203&L=fsl&D=0&P=300924

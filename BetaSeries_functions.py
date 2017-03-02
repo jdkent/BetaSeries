@@ -286,7 +286,7 @@ def GenTransforms(outDir,ex_func,T1_brain,T1_head,fmap=None,fmapmag=None,fmapmag
 	"""################
 	   #function: GenTransforms
 	   ################
-	   #purpose: creates the transforms to move func to MNI
+	   #purpose: creates the transforms to move func to MNI (and vice versa)
 	   ################
 	   #preconditions: fsl is installed
 	   ################
@@ -305,12 +305,19 @@ def GenTransforms(outDir,ex_func,T1_brain,T1_head,fmap=None,fmapmag=None,fmapmag
 	   #output: T1toMNI_warp.nii.gz
 	   #        T1toMNI.mat
 	   #		T1toMNI_flirt
+	   #		T1toMNI_fnirt
+	   #		T1toMNIfnirt.log
 	   #        functoT1.mat
 	   #        functoMNI_warp.nii.gz
 	   #        MNItoT1_warp.nii.gz
 	   #        MNItoT1.mat
 	   #        MNItofunc_warp.nii.gz
+	   #		T1tofunc.mat
+	   #		OPTIONAL (fieldmap)
+	   #		T1tofunc_warp
+	   #		functoT1_warp
 	   ################"""
+
 	# Import needed modules
 	import os
 	import string
@@ -769,6 +776,8 @@ def PreICA(outDir,func,T1_brain,T1_head,fmap=None,fmapmag=None,fmapmagbrain=None
 	from collections import namedtuple
 	#current directory
 	currentdir=os.getcwd()
+	if not os.path.isdir(outDir):
+		os.makedirs(outDir)
 	os.chdir(outDir)
 	MCOutputs=MotionCorrect(func=func,outDir=os.path.join(outDir,'mc'))
 	GTOutputs=GenTransforms(outDir=os.path.join(outDir,'reg'),ex_func=MCOutputs.mcImgMean,T1_brain=T1_brain,T1_head=T1_head,fmap=fmap,fmapmag=fmapmag,fmapmagbrain=fmapmagbrain,echospacing=echospacing,pedir=pedir)
@@ -779,14 +788,14 @@ def PreICA(outDir,func,T1_brain,T1_head,fmap=None,fmapmag=None,fmapmagbrain=None
 		if not os.path.isdir(smoothDir):
 			os.makedirs(smoothDir)
 		SpatialSmoothOutputs=Spatial_Smooth(func_brain=SSmcImgOutputs.func_brain,func_mask=SSmcImgOutputs.func_mask,func_mean=SSmcImgMeanOutputs.func_brain,outDir=smoothDir)
-		PreICAOut=SpatialSmoothOutputs.smoothed_output
-	else:
-		PreICAOut=SSmcImgOutputs.func_brain
+		PreICAOutsmooth=SpatialSmoothOutputs.smoothed_output
+	
+	PreICAOutnosmooth=SSmcImgOutputs.func_brain
 
 
 	os.chdir(currentdir)
 	outputs=namedtuple("outfiles", ["func_smooth","func_nosmooth","functoT1_transform","T1toMNI_transform","func_mask","mcImgPar","MNItofunc_warp","functoMNI_warp"])
-	return outputs(PreICAOut,GTOutputs.functoT1_transform,GTOutputs.T1toMNI_transform,SSmcImgOutputs.func_mask,MCOutputs.mcImgPar,GTOutputs.MNItofunc_warp,GTOutputs.functoMNI_warp)
+	return outputs(PreICAOutsmooth,PreICAOutnosmooth,GTOutputs.functoT1_transform,GTOutputs.T1toMNI_transform,SSmcImgOutputs.func_mask,MCOutputs.mcImgPar,GTOutputs.MNItofunc_warp,GTOutputs.functoMNI_warp)
 
 #test: BetaSeries_functions.PreICA('/home/james/RestingState_dev/testout1','/home/james/RestingState_dev/data/pre_sub10_REST_RPI.nii.gz','/home/james/RestingState_dev/data/pre_sub10_MPRAGE-1_RPI_ss.nii.gz','/home/james/RestingState_dev/data/pre_sub10_MPRAGE-1_RPI.nii.gz')
 
@@ -1446,7 +1455,7 @@ def BetaSeries(outdir,whichEVs,numrealev,tempderiv=None):
 	import nipype.interfaces.fsl as fsl
 	import subprocess
 	#tmp addition directory of pybetaseries
-	subprocess.check_output("/home/james/dev/pybetaseries/pybetaseries.py --fsldir %s --whichevs %s --numrealev %s %s -LSS" % (outdir,str(whichEVs).strip('[]').replace(',',''),numrealev,tempderiv),shell=True)
+	subprocess.check_output("pybetaseries.py --fsldir %s --whichevs %s --numrealev %s %s -LSS" % (outdir,str(whichEVs).strip('[]').replace(',',''),numrealev,tempderiv),shell=True)
 	print "BetaSeries Successful!"
 	
 def MakeModel(func,EVs,outDir):
@@ -1498,80 +1507,96 @@ def MakeModel(func,EVs,outDir):
 	os.chdir(currentdir)
 
 
-def NuisanceRegression(filtered_func,Nrois,MNItofuncWarp,outdir,motion=False):
+
+def Normalize(Image):
 	import os
-	import string
 	import nipype.interfaces.fsl as fsl
-	import numpy as np
-	import nibabel as nib
-	#get the current directory:
 	currentdir=os.getcwd()
-	#go the outdir to make sure "intermediary" files are dropped off in the same place as "final" files
-	os.chdir(outdir)
-	#read the nuisance rois txt file
-	with open(Nrois,'r') as txt:
-		nrois=txt.read().strip().split('\n')
-	#initialize overall numpy array
-	func=nib.load(filtered_func)
-	length_ts=func.shape[3]
-	num_nrois=len(nrois)
-	#np.empty([num_nrois,length_ts])
+	outDir=os.path.dirname(Image)
+	os.chdir(outDir)
 
-	nrois_norm_ts_tot=os.path.join(outdir,'nrois_norm_ts.txt')
-	nrois_norm_ts_mat=os.path.join(outdir,'nrois_norm_ts.mat')
-	NuisanceReg_func=os.path.join(outdir,'NuisanceReg.nii.gz')
-	for index,nroi in enumerate(nrois,start=0):
-		basenroi=os.path.basename(nroi)
-		subnroi=os.path.join(outdir,basenroi)
-		nroi_ts=string.replace(subnroi,'.nii.gz','_ts.txt')
-		nroi_bin=string.replace(subnroi,'.nii.gz','_bin.nii.gz')
-		nroi_norm_ts=string.replace(subnroi,'.nii.gz','_norm_ts.txt')
-		#nrois_norm_ts_tot=string.replace(subnroi,'.nii.gz','_norm_ts_tot.txt')
-		#nrois_norm_ts_mat=string.replace(subnroi,'.nii.gz','_norm_ts_tot.mat')
-		#move nroi to subject space
-		stdnroi2subnroi=fsl.ApplyWarp(in_file=nroi,out_file=subnroi,ref_file=filtered_func,field_file=MNItofuncWarp)
-		stdnroi2subnroi.run()
 
-		#binarize mask
-		nroiBinCmd=fsl.ImageMaths(in_file=subnroi,out_file=nroi_bin,op_string='-thr 0.5 -bin')
-		nroiBinCmd.run()
-		
-		#extract the time series from the mask
-		ts_extraction=fsl.ImageMeants(in_file=filtered_func,mask=nroi_bin,out_file=nroi_ts)
-		ts_extraction.run()
+	#outfile names
+	ImageMean=Image.replace('.nii.gz','_mean.nii.gz')
+	ImageSD=Image.replace('.nii.gz','_sd.nii.gz')
+	ImageNorm=Image.replace('.nii.gz','_norm.nii.gz')
 
-		#read in the ts file
-		ts_arr=np.loadtxt(nroi_ts)
+	#get the standard deviation
+	SDimg=fsl.maths.StdImage(in_file=Image,out_file=ImageSD)
+	SDimg.run()
 
-		#norm the array
-		ts_norm=(ts_arr - ts_arr.mean()) / ts_arr.std()
-		
-		#write normed array to file
-		np.savetxt(nroi_norm_ts,ts_norm,'%3.10f')
+	#get the mean
+	MEANimg=fsl.MeanImage(in_file=Image,out_file=ImageMean)
+	MEANimg.run()
 
-		#save in larger array
-		if index == 0:
-			ts_norm_tot=ts_norm
-		else:
-			ts_norm_tot=np.column_stack((ts_norm_tot,ts_norm))
+	#Normalize the data to have a mean of 0 and an SD of 1.
+	NORMimg=fsl.maths.MultiImageMaths(in_file=Image,op_string='-sub %s -div %s',operand_files=[ImageMean,ImageSD],out_file=ImageNorm)
+	NORMimg.run()
 
-	#print out the total array to a file
-	np.savetxt(nrois_norm_ts_tot,ts_norm_tot,'%3.10f')
+	return ImageNorm
 
-	#transfer the text file to be readable by fsl
-	os.system('Text2Vest %s %s' % (nrois_norm_ts_tot,nrois_norm_ts_mat))
 
-	#return the normed list (for use to apply the regres,sion)
-	normed_list=[string.replace(nroi,'.nii.gz','_norm_ts.txt') for nroi in nrois]
+def SeedCorrelate(EVLSS,seed,Seed_Outdir,MNItofuncWarp,functoMNIwarp):
+	import os
+	import nipype.interfaces.fsl as fsl
+	import nipype.interfaces.afni as afni
+	import numpy as np
+	import string
+	currentdir=os.getcwd()
+	if not os.path.isdir(Seed_Outdir):
+		os.makedirs(Seed_Outdir)
+	os.chdir(Seed_Outdir)
 
-	#perform nuisance regression
-	nuisanceGLM=fsl.GLM(in_file=filtered_func,design=nrois_norm_ts_mat,out_res_name=NuisanceReg_func)
-	nuisanceGLM.run()
+	#outfile names
+	baseseed=os.path.basename(seed)
+	subseed=os.path.join(Seed_Outdir,baseseed)
+	subseed_bin=string.replace(subseed,'.nii.gz','_bin.nii.gz')
+	seed_ts=string.replace(subseed,'.nii.gz','_ts.txt')
+	seed_norm_ts=string.replace(subseed,'.nii.gz','_norm_ts.txt')
+	seed_rscore=string.replace(subseed,'.nii.gz','_rscore.nii.gz')
+	seed_rscore_MNI=string.replace(subseed,'.nii.gz','_rscore_MNI.nii.gz')
+	seed_zscore_MNI=string.replace(subseed,'.nii.gz','_zscore_MNI.nii.gz')
+	#Normalize the dataset:
+	EVLSS_norm = Normalize(EVLSS)
 
-	#go back to the original directory
+	#move nroi to subject space
+	stdseed2subseed=fsl.ApplyWarp(in_file=seed,out_file=subseed,ref_file=EVLSS,field_file=MNItofuncWarp)
+	stdseed2subseed.run()
+
+	#binarize mask
+	seedBinCmd=fsl.ImageMaths(in_file=subseed,out_file=subseed_bin,op_string='-thr 0.5 -bin')
+	seedBinCmd.run()
+	
+	#extract the time series from the mask
+	ts_extraction=fsl.ImageMeants(in_file=EVLSS_norm,mask=subseed_bin,out_file=seed_ts)
+	ts_extraction.run()
+
+	#read in the ts file
+	ts_arr=np.loadtxt(seed_ts)
+
+	#norm the array
+	ts_norm=(ts_arr - ts_arr.mean()) / ts_arr.std()
+	
+	#write normed array to file
+	np.savetxt(seed_norm_ts,ts_norm,'%3.10f')
+
+	#correlate the normed ts with the normed image
+	correlate=afni.TCorr1D(xset=EVLSS_norm,y_1d=seed_norm_ts,out_file=seed_rscore)
+	correlate.run()
+
+	#register the image to MNI space
+	sub2MNI=fsl.ApplyWarp(in_file=seed_rscore,out_file=seed_rscore_MNI,ref_file=fsl.Info.standard_image('MNI152_T1_2mm_brain.nii.gz'),field_file=functoMNIwarp)
+	sub2MNI.run()
+
+	#transfer the rscore to a zscore
+	r2z_transform=afni.Calc(in_file_a=seed_rscore_MNI,expr='log((1+a)/(1-a))/2',out_file=seed_zscore_MNI)
+	r2z_transform.run()
+
+	#change directory back to original
 	os.chdir(currentdir)
+	#this is it?
 
-	return NuisanceReg_func
+
 #Notes:
 #Don't do prewhitening for a seed based analysis?
 #https://www.jiscmail.ac.uk/cgi-bin/webadmin?A2=ind1203&L=fsl&D=0&P=300924

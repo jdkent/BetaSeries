@@ -779,10 +779,10 @@ def PreICA(outDir,func,T1_brain,T1_head,fmap=None,fmapmag=None,fmapmagbrain=None
 	if not os.path.isdir(outDir):
 		os.makedirs(outDir)
 	os.chdir(outDir)
-	MCOutputs=MotionCorrect(func=func,outDir=os.path.join(outDir,'mc'))
-	GTOutputs=GenTransforms(outDir=os.path.join(outDir,'reg'),ex_func=MCOutputs.mcImgMean,T1_brain=T1_brain,T1_head=T1_head,fmap=fmap,fmapmag=fmapmag,fmapmagbrain=fmapmagbrain,echospacing=echospacing,pedir=pedir)
-	SSmcImgOutputs=skullstripEPI(func=MCOutputs.mcImg,T1_brain=T1_brain,T1tofunc_transform=GTOutputs.T1tofunc_transform,EPI_mask=None)
-	SSmcImgMeanOutputs=skullstripEPI(func=MCOutputs.mcImgMean,T1_brain=None,T1tofunc_transform=None,EPI_mask=SSmcImgOutputs.func_mask)
+	MCOutputs = MotionCorrect(func=func,outDir=os.path.join(outDir,'mc'))
+	GTOutputs = GenTransforms(outDir=os.path.join(outDir,'reg'),ex_func=MCOutputs.mcImgMean,T1_brain=T1_brain,T1_head=T1_head,fmap=fmap,fmapmag=fmapmag,fmapmagbrain=fmapmagbrain,echospacing=echospacing,pedir=pedir)
+	SSmcImgOutputs = skullstripEPI(func=MCOutputs.mcImg,T1_brain=T1_brain,T1tofunc_transform=GTOutputs.T1tofunc_transform,EPI_mask=None)
+	SSmcImgMeanOutputs = skullstripEPI(func=MCOutputs.mcImgMean,T1_brain=None,T1tofunc_transform=None,EPI_mask=SSmcImgOutputs.func_mask)
 	if smooth:
 		smoothDir=os.path.join(outDir,'smooth')
 		if not os.path.isdir(smoothDir):

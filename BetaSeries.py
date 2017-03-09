@@ -175,7 +175,7 @@ for seed,Nroi in zip(Seeds,Nrois):
 		Nuis_reg=os.path.join(PreprocessDir,'Nuisance_Regression_%s_eig' % (seedname))
 	else:
 		print 'ERROR'
-		return 1
+
 	if not os.path.isdir(Nuis_reg):
 		os.makedirs(Nuis_reg)
 	NuisanceReg_func = betafunc.NuisanceRegression(Temp_Filt_Func,Nroi,ICA_inputs.MNItofunc_warp,Nuis_reg,motion=False,eig=eig)

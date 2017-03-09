@@ -1577,8 +1577,15 @@ def SeedCorrelate(EVLSS,seed,Seed_Outdir,MNItofuncWarp,functoMNIwarp,eig=False):
 	elif eig:
 		 seedtsbase=string.replace(subseed,'.nii.gz','')
 		 seed_ts=string.replace(subseed,'.nii.gz','00.1D')
+		 seed_norm_ts=string.replace(subseed,'.nii.gz','_norm_eig_ts.txt')
+		 seed_rscore=string.replace(subseed,'.nii.gz','_eig_rscore.nii.gz')
+		 seed_rscore_MNI=string.replace(subseed,'.nii.gz','_eig_rscore_MNI.nii.gz')
+		 seed_zscore_MNI=string.replace(subseed,'.nii.gz','_eig_zscore_MNI.nii.gz')
 		 subprocess.check_output("3dpc -prefix %s -pcsave 1 -nscal -mask %s %s" % (seedtsbase,subseed_bin,EVLSS_norm),shell=True)
-		 
+	else:
+		print 'eig not define: error!'
+		return 1
+
 	#read in the ts file
 	ts_arr=np.loadtxt(seed_ts)
 

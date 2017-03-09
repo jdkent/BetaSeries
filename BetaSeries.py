@@ -172,7 +172,7 @@ for seed,Nroi in zip(Seeds,Nrois):
 	Nuis_reg=os.path.join(PreprocessDir,'Nuisance_Regression_%s' % (seedname))
 	if not os.path.isdir(Nuis_reg):
 		os.makedirs(Nuis_reg)
-	NuisanceReg_func = betafunc.NuisanceRegression(Temp_Filt_Func,Nroi,ICA_inputs.MNItofunc_warp,Nuis_reg,motion=False)
+	NuisanceReg_func = betafunc.NuisanceRegression(Temp_Filt_Func,Nroi,ICA_inputs.MNItofunc_warp,Nuis_reg,motion=False,eig)
 
 	#complete betaseries prep on the data
 	Run_BetaSeries=os.path.join(BetaSeriesDir,'BetaSeries_%s' % (seedname))
@@ -192,7 +192,7 @@ for seed,Nroi in zip(Seeds,Nrois):
 	if not os.path.islink(mask):
 		os.symlink(ICA_inputs.func_mask,mask)
 	#run the betaseries (which expects func and mask in the appropiate place)
-	if not os.path.isdir(os.path.join(Run_BetaSeries,'betaseries/ev1_LSS.nii.gz')):
+	if not os.path.isfile(os.path.join(Run_BetaSeries,'betaseries/ev1_LSS.nii.gz')):
 		betafunc.BetaSeries(Run_BetaSeries,whichEVs,numrealev,tempderiv)
 
 	#Extract seed for each ev and run the correlation

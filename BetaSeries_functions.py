@@ -1371,12 +1371,14 @@ def TemporalFilter(denoised_func,outDir):
 	os.chdir(currentdir)
 	return Tempfilt_output
 
-def NuisanceRegression(filtered_func,Nrois,MNItofuncWarp,outdir,motion=False):
+def NuisanceRegression(filtered_func,Nrois,MNItofuncWarp,outdir,motion=False,eig=False):
 	import os
 	import string
 	import nipype.interfaces.fsl as fsl
 	import numpy as np
 	import nibabel as nib
+	import subprocess
+
 	#get the current directory:
 	currentdir=os.getcwd()
 	#go the outdir to make sure "intermediary" files are dropped off in the same place as "final" files
@@ -1389,9 +1391,13 @@ def NuisanceRegression(filtered_func,Nrois,MNItofuncWarp,outdir,motion=False):
 	length_ts=func.shape[3]
 	num_nrois=len(nrois)
 	#np.empty([num_nrois,length_ts])
+	if not eig:
+		nrois_norm_ts_tot=os.path.join(outdir,'nrois_norm_ts.txt')
+		nrois_norm_ts_mat=os.path.join(outdir,'nrois_norm_ts.mat')
+	if eig:
+		nrois_norm_ts_tot=os.path.join(outdir,'_eig_nrois_norm_ts.txt')
+		nrois_norm_ts_mat=os.path.join(outdir,'_eig_nrois_norm_ts.mat')
 
-	nrois_norm_ts_tot=os.path.join(outdir,'nrois_norm_ts.txt')
-	nrois_norm_ts_mat=os.path.join(outdir,'nrois_norm_ts.mat')
 	NuisanceReg_func=os.path.join(outdir,'NuisanceReg.nii.gz')
 	for index,nroi in enumerate(nrois,start=0):
 		basenroi=os.path.basename(nroi)
@@ -1410,8 +1416,18 @@ def NuisanceRegression(filtered_func,Nrois,MNItofuncWarp,outdir,motion=False):
 		nroiBinCmd.run()
 		
 		#extract the time series from the mask
-		ts_extraction=fsl.ImageMeants(in_file=filtered_func,mask=nroi_bin,out_file=nroi_ts)
-		ts_extraction.run()
+		if not eig:
+			ts_extraction=fsl.ImageMeants(in_file=filtered_func,mask=nroi_bin,out_file=nroi_ts)
+			ts_extraction.run()
+		elif eig:
+			nroi_base=string.replace(subnroi,'.nii.gz','')
+			nroi_ts=string.replace(subnroi,'.nii.gz','00.1D')
+			roi_bin=string.replace(subnroi,'.nii.gz','_eig_bin.nii.gz')
+			nroi_norm_ts=string.replace(subnroi,'.nii.gz','_eig_norm_ts.txt')
+			subprocess.check_output("3dpc -prefix %s -pcsave 1 -nscal -mask %s %s" % (subnroi_base,nroi_bin,filtered_func),shell=True)
+		else:
+			print 'Error! eig not set'
+			return 1
 
 		#read in the ts file
 		ts_arr=np.loadtxt(nroi_ts)

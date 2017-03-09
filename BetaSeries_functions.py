@@ -1420,9 +1420,8 @@ def NuisanceRegression(filtered_func,Nrois,MNItofuncWarp,outdir,motion=False,eig
 			ts_extraction=fsl.ImageMeants(in_file=filtered_func,mask=nroi_bin,out_file=nroi_ts)
 			ts_extraction.run()
 		elif eig:
-			nroi_base=string.replace(subnroi,'.nii.gz','')
+			subnroi_base=string.replace(subnroi,'.nii.gz','')
 			nroi_ts=string.replace(subnroi,'.nii.gz','00.1D')
-			roi_bin=string.replace(subnroi,'.nii.gz','_eig_bin.nii.gz')
 			nroi_norm_ts=string.replace(subnroi,'.nii.gz','_eig_norm_ts.txt')
 			NuisanceReg_func=os.path.join(outdir,'NuisanceReg_eig.nii.gz')
 			subprocess.check_output("3dpc -prefix %s -pcsave 1 -nscal -mask %s %s" % (subnroi_base,nroi_bin,filtered_func),shell=True)

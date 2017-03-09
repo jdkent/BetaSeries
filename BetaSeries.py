@@ -169,13 +169,25 @@ Temp_Filt_Func = betafunc.TemporalFilter(denoised_func_nosmooth,Temp_FiltoutDir)
 BetaSeriesDir=os.path.join(outDir,'BetaSeries')
 for seed,Nroi in zip(Seeds,Nrois):
 	seedname=os.path.basename(seed).replace('.nii.gz','')
-	Nuis_reg=os.path.join(PreprocessDir,'Nuisance_Regression_%s' % (seedname))
+	if not eig:
+		Nuis_reg=os.path.join(PreprocessDir,'Nuisance_Regression_%s' % (seedname))
+	elif eig:
+		Nuis_reg=os.path.join(PreprocessDir,'Nuisance_Regression_%s_eig' % (seedname))
+	else:
+		print 'ERROR'
+		return 1
 	if not os.path.isdir(Nuis_reg):
 		os.makedirs(Nuis_reg)
 	NuisanceReg_func = betafunc.NuisanceRegression(Temp_Filt_Func,Nroi,ICA_inputs.MNItofunc_warp,Nuis_reg,motion=False,eig)
 
 	#complete betaseries prep on the data
-	Run_BetaSeries=os.path.join(BetaSeriesDir,'BetaSeries_%s' % (seedname))
+	if not eig:
+		Run_BetaSeries=os.path.join(BetaSeriesDir,'BetaSeries_%s' % (seedname))
+	elif eig:
+		Run_BetaSeries=os.path.join(BetaSeriesDir,'BetaSeries_%s_eig' % (seedname))
+	else:
+		print 'ERROR'
+		
 	if not os.path.isdir(Run_BetaSeries):
 		os.makedirs(Run_BetaSeries)
 	betafunc.MakeModel(NuisanceReg_func,EVs,Run_BetaSeries)

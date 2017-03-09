@@ -39,6 +39,7 @@ nonfeatoptions.add_argument('-s', '--Seeds',dest="Seeds",required=True)
 nonfeatoptions.add_argument('-w', '--whichEVs',dest="whichEVs",required=True,nargs='+')
 nonfeatoptions.add_argument('-tempderiv',dest='tempderiv',action='store_true',
             default=False,help='Include tag if the original design matrix includes temporal derivates. The code assumes that temporal derivatives are immediately after each EV/motion parameter in the Feat design matrix.')
+
 #nrois
 #seeds
 #don't know if this works
@@ -59,7 +60,7 @@ optoptions.add_argument('-tr', dest="TR", help='TR in seconds',type=float)
 optoptions.add_argument('-den', dest="denType", default="nonaggr", help='Type of denoising strategy: \'no\': only classification, no denoising; \'nonaggr\': non-aggresssive denoising (default); \'aggr\': aggressive denoising; \'both\': both aggressive and non-aggressive denoising (seperately)')
 optoptions.add_argument('-md','-meldir', dest="melDir", default="",help='MELODIC directory name, in case MELODIC has been run previously.')
 optoptions.add_argument('-dim', dest="dim", default=0,help='Dimensionality reduction into #num dimensions when running MELODIC (default: automatic estimation; i.e. -dim 0)',type=int)
-
+optoptions.add_argument('-eig',dest='eig',action='store_true',default=False)
 print '\n------------------------------- RUNNING ICA-AROMA ------------------------------- '
 print '--------------- \'ICA-based Automatic Removal Of Motion Artifacts\' --------------- \n'
 
@@ -74,6 +75,7 @@ EVs=args.EVs
 outDir=args.outDir
 Nrois_list=args.Nrois
 whichEVs=args.whichEVs
+eig=args.eig
 
 with open(Nrois_list,'r') as txt:
 		Nrois=txt.read().strip().split('\n')
@@ -353,7 +355,7 @@ for seed,Nroi in zip(Seeds,Nrois):
 	for ev in whichEVs:
 		EVLSS=os.path.join(Run_BetaSeries,'betaseries/ev%s_LSS.nii.gz' % (ev))
 		Seed_Outdir=os.path.join(outDir,"Results/%s/%s/" % (seedname,"ev"+str(ev)))
-		betafunc.SeedCorrelate(EVLSS,seed,Seed_Outdir,ICA_inputs.MNItofunc_warp,ICA_inputs.functoMNI_warp)
+		betafunc.SeedCorrelate(EVLSS,seed,Seed_Outdir,ICA_inputs.MNItofunc_warp,ICA_inputs.functoMNI_warp,eig)
 
 #next step. Use seed regions to do correlations
 

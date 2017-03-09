@@ -1536,12 +1536,15 @@ def Normalize(Image):
 	return ImageNorm
 
 
-def SeedCorrelate(EVLSS,seed,Seed_Outdir,MNItofuncWarp,functoMNIwarp):
+def SeedCorrelate(EVLSS,seed,Seed_Outdir,MNItofuncWarp,functoMNIwarp,eig=False):
 	import os
 	import nipype.interfaces.fsl as fsl
 	import nipype.interfaces.afni as afni
 	import numpy as np
 	import string
+	if eig:
+		import subprocess
+
 	currentdir=os.getcwd()
 	if not os.path.isdir(Seed_Outdir):
 		os.makedirs(Seed_Outdir)
@@ -1568,9 +1571,14 @@ def SeedCorrelate(EVLSS,seed,Seed_Outdir,MNItofuncWarp,functoMNIwarp):
 	seedBinCmd.run()
 	
 	#extract the time series from the mask
-	ts_extraction=fsl.ImageMeants(in_file=EVLSS_norm,mask=subseed_bin,out_file=seed_ts)
-	ts_extraction.run()
-
+	if not eig:
+		ts_extraction=fsl.ImageMeants(in_file=EVLSS_norm,mask=subseed_bin,out_file=seed_ts)
+		ts_extraction.run()
+	elif eig:
+		 seedtsbase=string.replace(subseed,'.nii.gz','')
+		 seed_ts=string.replace(subseed,'.nii.gz','00.1D')
+		 subprocess.check_output("3dpc -prefix %s -pcsave 1 -nscal -mask %s %s" % (seedtsbase,subseed_bin,EVLSS_norm),shell=True)
+		 
 	#read in the ts file
 	ts_arr=np.loadtxt(seed_ts)
 

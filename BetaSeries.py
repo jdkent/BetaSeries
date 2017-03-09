@@ -178,7 +178,7 @@ for seed,Nroi in zip(Seeds,Nrois):
 		return 1
 	if not os.path.isdir(Nuis_reg):
 		os.makedirs(Nuis_reg)
-	NuisanceReg_func = betafunc.NuisanceRegression(Temp_Filt_Func,Nroi,ICA_inputs.MNItofunc_warp,Nuis_reg,motion=False,eig)
+	NuisanceReg_func = betafunc.NuisanceRegression(Temp_Filt_Func,Nroi,ICA_inputs.MNItofunc_warp,Nuis_reg,motion=False,eig=eig)
 
 	#complete betaseries prep on the data
 	if not eig:
@@ -187,7 +187,7 @@ for seed,Nroi in zip(Seeds,Nrois):
 		Run_BetaSeries=os.path.join(BetaSeriesDir,'BetaSeries_%s_eig' % (seedname))
 	else:
 		print 'ERROR'
-		
+
 	if not os.path.isdir(Run_BetaSeries):
 		os.makedirs(Run_BetaSeries)
 	betafunc.MakeModel(NuisanceReg_func,EVs,Run_BetaSeries)

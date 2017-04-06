@@ -1,5 +1,35 @@
 #!/usr/bin/env python
+
+def txt2nifti(txt,TR=2.0):
+	import nibabel as nib
+	import numpy as np
+	import string
+	#makes a nifti file from a txt file (for using packages designed for nifti)
+	
+	#nifti filename
+	img_name=string.replace(txt,'.1D','.nii.gz')
+	#img_name=string.replace(txt,'.txt','.nii.gz')
+	print "this is the image name: %s" % img_name
+	#make a numpy array from seed time series
+	img_data=np.loadtxt(txt)
+
+	length=img_data.size
+	#reshape array to fit in nifti image
+	img_data=img_data.reshape((1,1,1,length))
+
+	#create image (affine = eyes matrix)
+	img = nib.Nifti1Image(img_data,np.eye(4))
+
+	#set the tr to appropiate number (default 2) 
+	img.get_header().set_zooms((1.0, 1.0, 1.0, TR))
+
+	#write the image to a file
+	img.to_filename(img_name)
+
+	return img_name
+
 def getmiddlevolume(func):
+	#returns the middle volume of a 4d image as an integer
     from nibabel import load
     funcfile = func
     if isinstance(func, list):
@@ -10,6 +40,7 @@ def getmiddlevolume(func):
 
 def makeMask(image):
 	#binarizes a 3d volume
+	#outputs name of the file with "mask" appended to the name
 	import os
 	import collections
 	import nipype.interfaces.fsl as fsl
@@ -26,7 +57,7 @@ def makeMask(image):
 	MaskCmd=fsl.ImageMaths()
 	MaskCmd.inputs.in_file=image
 	MaskCmd.inputs.out_file=MaskFile
-	MaskCmd.inputs.op_string='-bin'
+	MaskCmd.inputs.op_string='-Tmean -bin'
 
 	try:
 		MaskCmd.run()
@@ -41,6 +72,37 @@ def makeMask(image):
 
 
 def MotionCorrect(func,outDir):
+	"""################
+	   #function: MotionCorrect
+	   ################
+	   #purpose: completes motion correction and outputs motion parameters
+	   ################
+	   #preconditions: fsl and afni is installed
+	   ################
+	   #input: func, typically 4d functional nifti with no other preprocessing
+	   #	   outDir, full path to where the outputs will be placed
+	   ################
+	   #output: mcImg.nii.gz
+	   #		mcImg_raw.par
+	   #		mcImg_mat.aff12.1D
+	   #		mcImgMaxDisp.mat_delt
+	   #		mcImgMaxDisp.mat
+	   #		mcImg1D.mat
+	   #		mcImgmean.nii.gz
+	   #		mcImg_rel.rms
+	   #		mcImg_mm.par
+	   #		mcImg_deriv.par
+	   #		mcImg_deg.par
+	   #		mcImg_abs.rms
+	   #		mcImg.par
+	   #		mc{1..6}.txt
+	   #		trans.png
+	   #		rot_mm.png
+	   #		abs_mot.png
+	   #		rel_mot.png
+	   #		rot.png
+	   #		mc.log
+	   ################"""
 	import os
 	import subprocess
 	from collections import namedtuple
@@ -629,6 +691,22 @@ def GenTransforms(outDir,ex_func,T1_brain,T1_head,fmap=None,fmapmag=None,fmapmag
 
 #idk about the inputs, I think this way minimizes the processing?
 def Spatial_Smooth(func_brain,func_mask,func_mean,outDir):
+	"""################
+	   #function: Spatial_Smooth
+	   ################
+	   #purpose: spatially smooths the functional data
+	   ################
+	   #preconditions: fsl is installed
+	   ################
+	   #input: func_brain - functional brain 4d volume (motion corrected)
+	   #	   func_mask - brain mask for the functional image
+	   #	   func_mean - mean image of the functional image across time
+	   #	   outDir -directory where the output lives
+	   ################
+	   #output: func_smooth.nii.gz
+	   #		func_smooth.nii.gz_usan_size.nii.gz
+	   #		stat_result.json
+	   ################"""
 	import nipype.interfaces.fsl as fsl
 	import string
 	from collections import namedtuple
@@ -667,6 +745,23 @@ def Spatial_Smooth(func_brain,func_mask,func_mean,outDir):
 
 #test: BetaSeries_functions.skullstripEPI('/home/james/RestingState_dev/test/mc/mcImg.nii.gz','/home/james/RestingState_dev/data/pre_sub10_MPRAGE-1_RPI_ss.nii.gz','/home/james/RestingState_dev/reg/T1tofunc.mat')
 def skullstripEPI(func,T1_brain=None,T1tofunc_transform=None,EPI_mask=None):
+	"""################
+	   #function: skullstripEPI
+	   ################
+	   #purpose: spatially smooths the functional data
+	   ################
+	   #preconditions: fsl is installed
+	   ################
+	   #input: func_brain - functional brain 4d volume (motion corrected)
+	   #	   func_mask - brain mask for the functional image
+	   #	   func_mean - mean image of the functional image across time
+	   #	   outDir -directory where the output lives
+	   ################
+	   #output: func_smooth.nii.gz
+	   #		func_smooth.nii.gz_usan_size.nii.gz
+	   #		stat_result.json
+	   ################"""
+
 	#T1_mask (Assumes NIFTI)
 	import os
 	import string
@@ -680,7 +775,7 @@ def skullstripEPI(func,T1_brain=None,T1tofunc_transform=None,EPI_mask=None):
 	#change directory
 	os.chdir(outDir)
 
-	#check transform
+	#check if transforms were supplied (T1 to func) and if they are linear or non-linear
 	if T1tofunc_transform is not None:
 		transform_type=os.path.basename(T1tofunc_transform)
 	else:
@@ -695,8 +790,8 @@ def skullstripEPI(func,T1_brain=None,T1tofunc_transform=None,EPI_mask=None):
 	else:
 		T1tofunc_mat=None
 		T1tofunc_warp=None
-	#T1_mask=string.replace(T1_brain,".nii.gz","_mask.nii.gz")
-	#in case the user doesn'tsupplies a mask
+	
+	#in case the user doesn't supply a mask
 	if EPI_mask is None:
 		EPI_mask=string.replace(func,".nii.gz","_mask.nii.gz")
 		#make sure necessary inputs are filled in
@@ -705,6 +800,8 @@ def skullstripEPI(func,T1_brain=None,T1tofunc_transform=None,EPI_mask=None):
 			return 1
 	#output image
 	func_brain=string.replace(func,".nii.gz","_brain.nii.gz")
+
+
 	if T1_brain is not None:
 		T1_mask=makeMask(T1_brain)
 
@@ -772,6 +869,27 @@ def skullstripEPI(func,T1_brain=None,T1tofunc_transform=None,EPI_mask=None):
 #GenTransforms(outDir,ex_func,T1_brain,T1_head,fmap=None,fmapmag=None,fmapmagbrain=None,echospacing=None,pedir=None):
 #get rid of fslstandard: use os.environ['FSLDIR'], if this fails exit script
 def PreICA(outDir,func,T1_brain,T1_head,fmap=None,fmapmag=None,fmapmagbrain=None,echospacing=None,pedir=None,smooth=True):
+	"""################
+	   #function: PreICA
+	   ################
+	   #purpose: does the preprocessing before ICA-AROMA
+	   ################
+	   #preconditions: fsl and afni is installed and all the functions are defined
+	   ################
+	   #input:  outDir
+	   #		func
+	   #		T1_brain
+	   #		T1_head
+	   #		*optional*
+	   #		fmap
+	   #		fmapmag
+	   #		fmapmagbrain
+	   #		echospacing
+	   #		pedir
+	   #		smooth
+	   ################
+	   #output: <see other functions>
+	   ################"""
 	import os
 	from collections import namedtuple
 	#current directory
@@ -1371,7 +1489,7 @@ def TemporalFilter(denoised_func,outDir):
 	os.chdir(currentdir)
 	return Tempfilt_output
 
-def NuisanceRegression(filtered_func,Nrois,MNItofuncWarp,outdir,motion=False,eig=False):
+def NuisanceRegression(filtered_func,Nrois,MNItofuncWarp,outdir,motion=False,eig=True):
 	import os
 	import string
 	import nipype.interfaces.fsl as fsl
@@ -1395,8 +1513,8 @@ def NuisanceRegression(filtered_func,Nrois,MNItofuncWarp,outdir,motion=False,eig
 		nrois_norm_ts_tot=os.path.join(outdir,'nrois_norm_ts.txt')
 		nrois_norm_ts_mat=os.path.join(outdir,'nrois_norm_ts.mat')
 	if eig:
-		nrois_norm_ts_tot=os.path.join(outdir,'_eig_nrois_norm_ts.txt')
-		nrois_norm_ts_mat=os.path.join(outdir,'_eig_nrois_norm_ts.mat')
+		nrois_norm_ts_tot=os.path.join(outdir,'eig_nrois_norm_ts.txt')
+		nrois_norm_ts_mat=os.path.join(outdir,'eig_nrois_norm_ts.mat')
 
 	NuisanceReg_func=os.path.join(outdir,'NuisanceReg.nii.gz')
 	for index,nroi in enumerate(nrois,start=0):
@@ -1428,6 +1546,7 @@ def NuisanceRegression(filtered_func,Nrois,MNItofuncWarp,outdir,motion=False,eig
 		else:
 			print 'Error! eig not set'
 			return 1
+
 
 		#read in the ts file
 		ts_arr=np.loadtxt(nroi_ts)
@@ -1461,6 +1580,55 @@ def NuisanceRegression(filtered_func,Nrois,MNItofuncWarp,outdir,motion=False,eig
 	os.chdir(currentdir)
 
 	return NuisanceReg_func
+def Seedts2Img(func,seed,MNItofuncWarp,outdir,motion=False):
+	import os
+	import string
+	import nipype.interfaces.fsl as fsl
+	import numpy as np
+	import nibabel as nib
+	import subprocess
+	from collections import namedtuple
+
+	baseseed=os.path.basename(seed)
+	subseed=os.path.join(outdir,baseseed)
+	subseed_bin=string.replace(subseed,'.nii.gz','_bin.nii.gz')
+	seed_ts=string.replace(subseed,'.nii.gz','00.1D')
+	seed_norm_ts=string.replace(subseed,'.nii.gz','_norm_eig_ts.txt')
+	seedtsbase=string.replace(subseed,'.nii.gz','')
+
+	#tranform the seed from MNI space to func space
+	stdseed2subseed=fsl.ApplyWarp(in_file=seed,out_file=subseed,ref_file=func,field_file=MNItofuncWarp)
+	stdseed2subseed.run()
+
+	#binarize mask
+	seedBinCmd=fsl.ImageMaths(in_file=subseed,out_file=subseed_bin,op_string='-thr 0.5 -bin')
+	seedBinCmd.run()
+
+	#extract the timeseries (eigenvariate) from the seed into a txt file
+	subprocess.check_output("3dpc -prefix %s -pcsave 1 -nscal -mask %s %s" % (seedtsbase,subseed_bin,func),shell=True)
+
+	#transform the txt file to an image
+	seed_nifti=txt2nifti(seed_ts)
+
+	seed_norm_nifti=Normalize(seed_nifti)
+	voxel_mask=string.replace(seed_norm_nifti,".nii.gz","_mask.nii.gz")
+
+	#make a mask for the image
+	#MaskCmd=fsl.ImageMaths()
+	#MaskCmd.inputs.in_file=seed_norm_nifti
+	#MaskCmd.inputs.out_file=voxel_mask
+	#MaskCmd.inputs.op_string='-Tmean -add 1000 -bin'
+	#MaskCmd.run()
+	#mask was saying there were no dimensions to the image, trying to make a voxel mask manually
+	mask_arr=np.array([[[1]]])
+	mask_img=nib.Nifti1Image(mask_arr,np.eye(4))
+	mask_img.to_filename(voxel_mask)
+
+
+	#return the mask and the image in a tuple
+	outputs=namedtuple("outfiles", ["nifti_ts","voxel_mask"])
+	return outputs(seed_norm_nifti,voxel_mask)
+	#(outside of function): link the image and mask to fsldir, to run betaseries on it.
 
 def BetaSeries(outdir,whichEVs,numrealev,tempderiv=None):
 	#assumes the requisite files exist in an fsl "friendly" way
@@ -1552,7 +1720,7 @@ def Normalize(Image):
 	return ImageNorm
 
 
-def SeedCorrelate(EVLSS,seed,Seed_Outdir,MNItofuncWarp,functoMNIwarp,eig=False):
+def SeedCorrelate(EVLSS,Seed_Outdir,MNItofuncWarp,functoMNIwarp,eig=False,seed=None,seedimg=None):
 	import os
 	import nipype.interfaces.fsl as fsl
 	import nipype.interfaces.afni as afni
@@ -1567,29 +1735,42 @@ def SeedCorrelate(EVLSS,seed,Seed_Outdir,MNItofuncWarp,functoMNIwarp,eig=False):
 	os.chdir(Seed_Outdir)
 
 	#outfile names
-	baseseed=os.path.basename(seed)
-	subseed=os.path.join(Seed_Outdir,baseseed)
-	subseed_bin=string.replace(subseed,'.nii.gz','_bin.nii.gz')
-	seed_ts=string.replace(subseed,'.nii.gz','_ts.txt')
-	seed_norm_ts=string.replace(subseed,'.nii.gz','_norm_ts.txt')
-	seed_rscore=string.replace(subseed,'.nii.gz','_rscore.nii.gz')
-	seed_rscore_MNI=string.replace(subseed,'.nii.gz','_rscore_MNI.nii.gz')
-	seed_zscore_MNI=string.replace(subseed,'.nii.gz','_zscore_MNI.nii.gz')
-	#Normalize the dataset:
+	if seed is not None:
+		baseseed=os.path.basename(seed)
+	else:
+		baseseed=os.path.basename(seedimg)
+		subseed=os.path.join(Seed_Outdir,baseseed)
+		subseed_bin=string.replace(subseed,'.nii.gz','_bin.nii.gz')
+		seed_ts=string.replace(subseed,'.nii.gz','_ts.txt')
+		seed_norm_ts=string.replace(subseed,'.nii.gz','_norm_ts.txt')
+		seed_rscore=string.replace(subseed,'.nii.gz','_rscore.nii.gz')
+		seed_rscore_MNI=string.replace(subseed,'.nii.gz','_rscore_MNI.nii.gz')
+		seed_zscore_MNI=string.replace(subseed,'.nii.gz','_zscore_MNI.nii.gz')
+	#Normalize the dataset(s):
 	EVLSS_norm = Normalize(EVLSS)
 
-	#move nroi to subject space
-	stdseed2subseed=fsl.ApplyWarp(in_file=seed,out_file=subseed,ref_file=EVLSS,field_file=MNItofuncWarp)
-	stdseed2subseed.run()
+	if seedimg is not None:
+		seedimg_norm=Normalize(seedimg)
 
-	#binarize mask
-	seedBinCmd=fsl.ImageMaths(in_file=subseed,out_file=subseed_bin,op_string='-thr 0.5 -bin')
-	seedBinCmd.run()
+	if seed is not None:
+		#move nroi to subject space
+		stdseed2subseed=fsl.ApplyWarp(in_file=seed,out_file=subseed,ref_file=EVLSS,field_file=MNItofuncWarp)
+		stdseed2subseed.run()
+
+		#binarize mask
+		seedBinCmd=fsl.ImageMaths(in_file=subseed,out_file=subseed_bin,op_string='-thr 0.5 -bin')
+		seedBinCmd.run()
 	
+
 	#extract the time series from the mask
 	if not eig:
-		ts_extraction=fsl.ImageMeants(in_file=EVLSS_norm,mask=subseed_bin,out_file=seed_ts)
-		ts_extraction.run()
+		if seedimg is not None:
+			ts_extraction=fsl.ImageMeants(in_file=seedimg_norm,out_file=seed_ts)
+			ts_extraction.run()
+		else:
+			ts_extraction=fsl.ImageMeants(in_file=EVLSS_norm,mask=subseed_bin,out_file=seed_ts)
+			ts_extraction.run()
+	#outdated option (to be deleted)
 	elif eig:
 		 seedtsbase=string.replace(subseed,'.nii.gz','')
 		 seed_ts=string.replace(subseed,'.nii.gz','00.1D')
@@ -1599,7 +1780,7 @@ def SeedCorrelate(EVLSS,seed,Seed_Outdir,MNItofuncWarp,functoMNIwarp,eig=False):
 		 seed_zscore_MNI=string.replace(subseed,'.nii.gz','_eig_zscore_MNI.nii.gz')
 		 subprocess.check_output("3dpc -prefix %s -pcsave 1 -nscal -mask %s %s" % (seedtsbase,subseed_bin,EVLSS_norm),shell=True)
 	else:
-		print 'eig not define: error!'
+		print 'eig not defined: error!'
 		return 1
 
 	#read in the ts file

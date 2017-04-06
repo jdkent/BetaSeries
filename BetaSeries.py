@@ -1,5 +1,31 @@
 #!/usr/bin/env python
 
+################
+#Script: BetaSeries.py
+################
+#purpose: Does Beta Series Correlation from preprocessing to zscoring final maps in standard space
+################
+#preconditions: BetaSeries_functions is accessible in PYTHONPATH environment variable
+#				nipype is installed (and it's prereqs)
+#				numpy is installed
+#				fsl/afni are installed and accessible by your PATH environment variable.
+#				
+################
+#input:  outDir
+#		func
+#		T1_brain
+#		T1_head
+#		*optional*
+#		fmap
+#		fmapmag
+#		fmapmagbrain
+#		echospacing
+#		pedir
+#		smooth
+################
+#output: <see other functions>
+################
+
 # Import required modules
 import os
 import argparse
@@ -39,20 +65,8 @@ nonfeatoptions.add_argument('-s', '--Seeds',dest="Seeds",required=True)
 nonfeatoptions.add_argument('-w', '--whichEVs',dest="whichEVs",required=True,nargs='+')
 nonfeatoptions.add_argument('-tempderiv',dest='tempderiv',action='store_true',
             default=False,help='Include tag if the original design matrix includes temporal derivates. The code assumes that temporal derivatives are immediately after each EV/motion parameter in the Feat design matrix.')
-
-#nrois
-#seeds
-#don't know if this works
-#nonfeatoptions.add_argument('-s', '--smooth',required=False,action='store_false')
 #TODO: fieldmap stuff
-#nonfeatoptions.add_argument('-mc', dest="mc", required=False, help='motion correction file (e.g., /home/user/PROJECT/SUBJECT.feat/mc/prefiltered_func_data_mcf.par')
-#nonfeatoptions.add_argument('-a','-affmat', dest="affmat", default="", help='File name of the mat-file describing the affine registration (e.g., FSL FLIRT) of the functional data to structural space (.mat file). (e.g., /home/user/PROJECT/SUBJECT.feat/reg/example_func2highres.mat')
-#nonfeatoptions.add_argument('-w','-warp', dest="warp", default="", help='File name of the warp-file describing the non-linear registration (e.g., FSL FNIRT) of the structural data to MNI152 space (.nii.gz). (e.g., /home/user/PROJECT/SUBJECT.feat/reg/highres2standard_warp.nii.gz')
-#nonfeatoptions.add_argument('-m','-mask', dest="mask", default="", help='File name of the mask to be used for MELODIC (denoising will be performed on the original/non-masked input data)')
-
 # Required options in Feat mode
-#featoptions = parser.add_argument_group('Required arguments - FEAT mode')
-#featoptions.add_argument('-f', '-feat',dest="inFeat", required=False, help='Feat directory name (Feat should have been run without temporal filtering and including registration to MNI152)')
 
 # Optional options
 optoptions = parser.add_argument_group('Optional arguments')
@@ -163,6 +177,7 @@ if not os.path.isdir(Temp_FiltoutDir):
 	os.makedirs(Temp_FiltoutDir)
 Temp_Filt_Func = betafunc.TemporalFilter(denoised_func_nosmooth,Temp_FiltoutDir)
 
+#run betaseries on the base dataset
 #Complete nuisance regression on the data
 #Seeds is a list of seed regions
 #Nrois multiple txt files with each containing nrois for that seed.
@@ -179,24 +194,42 @@ for seed,Nroi in zip(Seeds,Nrois):
 	if not os.path.isdir(Nuis_reg):
 		os.makedirs(Nuis_reg)
 	NuisanceReg_func = betafunc.NuisanceRegression(Temp_Filt_Func,Nroi,ICA_inputs.MNItofunc_warp,Nuis_reg,motion=False,eig=eig)
-
+	seedfunc=betafunc.Seedts2Img(NuisanceReg_func,seed,ICA_inputs.MNItofunc_warp,Nuis_reg)
 	#complete betaseries prep on the data
 	if not eig:
-		Run_BetaSeries=os.path.join(BetaSeriesDir,'BetaSeries_%s' % (seedname))
+		Run_BetaSeries=os.path.join(BetaSeriesDir,'BetaSeries_%s_voxels' % (seedname))
+		Run_BetaSeries_Seed=os.path.join(BetaSeriesDir,'BetaSeries_%s_seed' % (seedname))
 	elif eig:
-		Run_BetaSeries=os.path.join(BetaSeriesDir,'BetaSeries_%s_eig' % (seedname))
+		Run_BetaSeries=os.path.join(BetaSeriesDir,'BetaSeries_%s_voxels_eig' % (seedname))
+		Run_BetaSeries_Seed=os.path.join(BetaSeriesDir,'BetaSeries_%s_seed_eig' % (seedname))
 	else:
 		print 'ERROR'
 
 	if not os.path.isdir(Run_BetaSeries):
 		os.makedirs(Run_BetaSeries)
+	#Make a model for all voxels
 	betafunc.MakeModel(NuisanceReg_func,EVs,Run_BetaSeries)
 
+	#Make a model for the seed region
+	betafunc.MakeModel(seedfunc.nifti_ts,EVs,Run_BetaSeries_Seed)
 	#hack from time crunch
 	whichEVs=[1, 2, 3] #pass in as a option
 	numrealev=4 #len(EVs)
 	tempderiv='-tempderiv'
 	#end hack
+
+	#run betaseries on the seed region
+	seed_data=os.path.join(Run_BetaSeries_Seed,'filtered_func_data.nii.gz')
+	seed_mask=os.path.join(Run_BetaSeries_Seed,'mask.nii.gz')
+	if not os.path.islink(seed_data):
+		os.symlink(seedfunc.nifti_ts,seed_data)
+	if not os.path.islink(seed_mask):
+		os.symlink(seedfunc.voxel_mask,seed_mask)
+	#run the betaseries (which expects func and mask in the appropiate place)
+	if not os.path.isfile(os.path.join(Run_BetaSeries_Seed,'betaseries/ev1_LSS.nii.gz')):
+		betafunc.BetaSeries(Run_BetaSeries_Seed,whichEVs,numrealev,tempderiv)
+
+	#run betaseries on all the voxels
 	func_data=os.path.join(Run_BetaSeries,'filtered_func_data.nii.gz')
 	mask=os.path.join(Run_BetaSeries,'mask.nii.gz')
 	if not os.path.islink(func_data):
@@ -210,8 +243,9 @@ for seed,Nroi in zip(Seeds,Nrois):
 	#Extract seed for each ev and run the correlation
 	for ev in whichEVs:
 		EVLSS=os.path.join(Run_BetaSeries,'betaseries/ev%s_LSS.nii.gz' % (ev))
+		seedimg=os.path.join(Run_BetaSeries_Seed,'betaseries/ev%s_LSS.nii.gz' % (ev))
 		Seed_Outdir=os.path.join(outDir,"Results/%s/%s/" % (seedname,"ev"+str(ev)))
-		betafunc.SeedCorrelate(EVLSS,seed,Seed_Outdir,ICA_inputs.MNItofunc_warp,ICA_inputs.functoMNI_warp,eig)
+		betafunc.SeedCorrelate(EVLSS=EVLSS,Seed_Outdir=Seed_Outdir,MNItofuncWarp=ICA_inputs.MNItofunc_warp,functoMNIwarp=ICA_inputs.functoMNI_warp,eig=False,seedimg=seedimg)
 
 #next step. Use seed regions to do correlations
 

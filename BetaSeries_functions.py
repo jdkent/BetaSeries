@@ -1496,7 +1496,8 @@ def NuisanceRegression(filtered_func,Nrois,MNItofuncWarp,outdir,motion=False,eig
 	import numpy as np
 	import nibabel as nib
 	import subprocess
-
+	#forcing eigenvariate to be true
+	#eig=True
 	#get the current directory:
 	currentdir=os.getcwd()
 	#go the outdir to make sure "intermediary" files are dropped off in the same place as "final" files
@@ -1542,7 +1543,7 @@ def NuisanceRegression(filtered_func,Nrois,MNItofuncWarp,outdir,motion=False,eig
 			nroi_ts=string.replace(subnroi,'.nii.gz','00.1D')
 			nroi_norm_ts=string.replace(subnroi,'.nii.gz','_eig_norm_ts.txt')
 			NuisanceReg_func=os.path.join(outdir,'NuisanceReg_eig.nii.gz')
-			subprocess.check_output("3dpc -prefix %s -pcsave 1 -nscal -mask %s %s" % (subnroi_base,nroi_bin,filtered_func),shell=True)
+			subprocess.check_output("3dpc -prefix %s -pcsave 1 -vmean -nscal -mask %s %s" % (subnroi_base,nroi_bin,filtered_func),shell=True)
 		else:
 			print 'Error! eig not set'
 			return 1
@@ -1605,7 +1606,8 @@ def Seedts2Img(func,seed,MNItofuncWarp,outdir,motion=False):
 	seedBinCmd.run()
 
 	#extract the timeseries (eigenvariate) from the seed into a txt file
-	subprocess.check_output("3dpc -prefix %s -pcsave 1 -nscal -mask %s %s" % (seedtsbase,subseed_bin,func),shell=True)
+	#potentially want to reduce the dataset and then take average from that dataset (-reduce)
+	subprocess.check_output("3dpc -prefix %s -pcsave 1 -vmean -nscal -mask %s %s" % (seedtsbase,subseed_bin,func),shell=True)
 
 	#transform the txt file to an image
 	seed_nifti=txt2nifti(seed_ts)
@@ -1778,7 +1780,7 @@ def SeedCorrelate(EVLSS,Seed_Outdir,MNItofuncWarp,functoMNIwarp,eig=False,seed=N
 		 seed_rscore=string.replace(subseed,'.nii.gz','_eig_rscore.nii.gz')
 		 seed_rscore_MNI=string.replace(subseed,'.nii.gz','_eig_rscore_MNI.nii.gz')
 		 seed_zscore_MNI=string.replace(subseed,'.nii.gz','_eig_zscore_MNI.nii.gz')
-		 subprocess.check_output("3dpc -prefix %s -pcsave 1 -nscal -mask %s %s" % (seedtsbase,subseed_bin,EVLSS_norm),shell=True)
+		 subprocess.check_output("3dpc -prefix %s -pcsave 1 -vmean -nscal -mask %s %s" % (seedtsbase,subseed_bin,EVLSS_norm),shell=True)
 	else:
 		print 'eig not defined: error!'
 		return 1

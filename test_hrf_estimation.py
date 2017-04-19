@@ -30,13 +30,22 @@ def hrf_estimation(tstxt,TR,stimtimes,pretime,posttime):
 	condnames=[ os.path.basename(os.path.splitext(x)[0]) for x in stimtimes ]
 	stimts_input=[] # initialize list (I don't think this is very pythonic)
 	for num,txt in enumerate(zip(stimtimes,condnames)):
-		stimts_input.append("-stim_times %s %s 'TENT(%s,%s,%s)' -stim_label %s %s -iresp %s %s_resp" % (num+1, txt[0], pretime, posttime, numpoints, num+1, txt[1], num+1, txt[1]))
+
+		stimfile=open(txt[0],"r")
+		stimlist=[ float(x) for x in stimfile.read().split('\n') if x ]
+		if len(stimlist) is 0 or len(stimlist) is 1 and stimlist[0] == 0:
+			print "stim file either is empty or only has a zero: " + txt[0]
+			numstimts-=1
+		else:
+			stimts_input.append("-stim_times %s %s 'TENT(%s,%s,%s)' -stim_label %s %s -iresp %s %s_resp" % (num+1, txt[0], pretime, posttime, numpoints, num+1, txt[1], num+1, txt[1]))
 
 	#treat the list as a long string
 	stimts_input_string=' '.join(str(x) for x in stimts_input)
 
 	#condtruct the entire afni command
-	afni_cmd="3dDeconvolve -input1D %s -polort A -TR_1D %s -num_stimts %s %s -tout -fout -bucket %s_bucket" % (tstxt,TR,numstimts,stimts_input_string,tstxtname)
+	#caution, I'm including the GOFORIT 3 command becuase some the error files only have 1 value, and this makes it very hard to estimate the HRF using FIR with only one observation.
+	#Since I don't care about error trials, I'm telling 3dDeconvolve to run anyways.
+	afni_cmd="3dDeconvolve -GOFORIT 3 -input1D %s -polort A -TR_1D %s -num_stimts %s %s -tout -fout -bucket %s_bucket" % (tstxt,TR,numstimts,stimts_input_string,tstxtname)
 
 	#print what we are running
 	print "Running:\n" + afni_cmd + "\n"
@@ -44,6 +53,9 @@ def hrf_estimation(tstxt,TR,stimtimes,pretime,posttime):
 	#actually run the afni command
 	subprocess.check_output(afni_cmd,shell=True)
 #########################################################################
+
+
+
 
 #set up arguments to be read in from the command line
 parser = argparse.ArgumentParser(description='wrapper to use AFNI\'s 3dDeconvolve to estimate the hrf from a 1d txt file')

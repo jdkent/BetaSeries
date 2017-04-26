@@ -1538,7 +1538,7 @@ def TemporalFilter(denoised_func,outDir):
 	os.chdir(currentdir)
 	return Tempfilt_output
 
-def NuisanceRegression(filtered_func,Nrois,MNItofuncWarp,outdir,motion=False,eig=True):
+def NuisanceRegression(filtered_func,Nrois,MNItofuncWarp,outdir,motion=False,eig=False):
 	import os
 	import string
 	import nipype.interfaces.fsl as fsl

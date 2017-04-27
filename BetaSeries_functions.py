@@ -1545,8 +1545,8 @@ def NuisanceRegression(filtered_func,Nrois,MNItofuncWarp,outdir,motion=False,eig
 	import numpy as np
 	import nibabel as nib
 	import subprocess
-	#forcing eigenvariate to be true
-	#eig=True
+	#forcing eigenvariate to be false
+	eig=False
 	#get the current directory:
 	currentdir=os.getcwd()
 	#go the outdir to make sure "intermediary" files are dropped off in the same place as "final" files
@@ -1630,7 +1630,8 @@ def NuisanceRegression(filtered_func,Nrois,MNItofuncWarp,outdir,motion=False,eig
 	os.chdir(currentdir)
 
 	return NuisanceReg_func
-def Seedts2Img(func,seed,MNItofuncWarp,outdir,motion=False):
+
+def Seedts2Img(func,seed,MNItofuncWarp,outdir,motion=False,eig=False):
 	import os
 	import string
 	import nipype.interfaces.fsl as fsl
@@ -1642,9 +1643,17 @@ def Seedts2Img(func,seed,MNItofuncWarp,outdir,motion=False):
 	baseseed=os.path.basename(seed)
 	subseed=os.path.join(outdir,baseseed)
 	subseed_bin=string.replace(subseed,'.nii.gz','_bin.nii.gz')
-	seed_ts=string.replace(subseed,'.nii.gz','00.1D')
-	seed_norm_ts=string.replace(subseed,'.nii.gz','_norm_eig_ts.txt')
-	seedtsbase=string.replace(subseed,'.nii.gz','')
+	if eig:
+		seed_ts=string.replace(subseed,'.nii.gz','00.1D')
+		seed_norm_ts=string.replace(subseed,'.nii.gz','_norm_eig_ts.txt')
+		seedtsbase=string.replace(subseed,'.nii.gz','')
+	elif not eig:
+		seed_ts=string.replace(subseed,'.nii.gz','_ts.txt')
+		seed_norm_ts=string.replace(subseed,'.nii.gz','_norm_ts.txt')
+		seedtsbase=string.replace(subseed,'.nii.gz','')
+	else:
+		print "eig not set, exiting"
+		return 1
 
 	#tranform the seed from MNI space to func space
 	stdseed2subseed=fsl.ApplyWarp(in_file=seed,out_file=subseed,ref_file=func,field_file=MNItofuncWarp)
@@ -1656,7 +1665,11 @@ def Seedts2Img(func,seed,MNItofuncWarp,outdir,motion=False):
 
 	#extract the timeseries (eigenvariate) from the seed into a txt file
 	#potentially want to reduce the dataset and then take average from that dataset (-reduce)
-	subprocess.check_output("3dpc -prefix %s -pcsave 1 -vmean -nscal -mask %s %s" % (seedtsbase,subseed_bin,func),shell=True)
+	if eig: 
+		subprocess.check_output("3dpc -prefix %s -pcsave 1 -vmean -nscal -mask %s %s" % (seedtsbase,subseed_bin,func),shell=True)
+	elif not eig:
+		ts_extraction=fsl.ImageMeants(in_file=func,mask=seedtsbase_bin,out_file=seed_ts)
+		ts_extraction.run()
 
 	#transform the txt file to an image
 	seed_nifti=txt2nifti(seed_ts)

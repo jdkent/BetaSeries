@@ -1630,7 +1630,7 @@ def NuisanceRegression(filtered_func,Nrois,MNItofuncWarp,outdir,motion=False,eig
 	os.chdir(currentdir)
 
 	return NuisanceReg_func
-def Seedts2Img(func,seed,MNItofuncWarp,outdir,motion=False):
+def Seedts2Img(func,seed,MNItofuncWarp,outdir,motion=False,eig=False):
 	import os
 	import string
 	import nipype.interfaces.fsl as fsl
@@ -1638,12 +1638,11 @@ def Seedts2Img(func,seed,MNItofuncWarp,outdir,motion=False):
 	import nibabel as nib
 	import subprocess
 	from collections import namedtuple
-
 	baseseed=os.path.basename(seed)
 	subseed=os.path.join(outdir,baseseed)
 	subseed_bin=string.replace(subseed,'.nii.gz','_bin.nii.gz')
-	seed_ts=string.replace(subseed,'.nii.gz','00.1D')
-	seed_norm_ts=string.replace(subseed,'.nii.gz','_norm_eig_ts.txt')
+	seed_ts=string.replace(subseed,'.nii.gz','_ts.txt')
+	seed_norm_ts=string.replace(subseed,'.nii.gz','_norm_ts.txt')
 	seedtsbase=string.replace(subseed,'.nii.gz','')
 
 	#tranform the seed from MNI space to func space
@@ -1656,8 +1655,15 @@ def Seedts2Img(func,seed,MNItofuncWarp,outdir,motion=False):
 
 	#extract the timeseries (eigenvariate) from the seed into a txt file
 	#potentially want to reduce the dataset and then take average from that dataset (-reduce)
-	subprocess.check_output("3dpc -prefix %s -pcsave 1 -vmean -nscal -mask %s %s" % (seedtsbase,subseed_bin,func),shell=True)
-
+	if not eig:
+		ts_extraction=fsl.ImageMeants(in_file=func,mask=subseed_bin,out_file=seed_ts)
+		ts_extraction.run()
+	elif eig:
+		seed_ts=string.replace(subseed,'.nii.gz','00.1D')
+		seed_norm_ts=string.replace(subseed,'.nii.gz','_norm_eig_ts.txt')
+		subprocess.check_output("3dpc -prefix %s -pcsave 1 -vmean -nscal -mask %s %s" % (seedtsbase,subseed_bin,func),shell=True)
+	else:
+		print "eig not defined!"
 	#transform the txt file to an image
 	seed_nifti=txt2nifti(seed_ts)
 

@@ -56,8 +56,8 @@ def txt2nifti(txt,TR=2.0):
 	#makes a nifti file from a txt file (for using packages designed for nifti)
 	
 	#nifti filename
-	img_name=string.replace(txt,'.1D','.nii.gz')
-	#img_name=string.replace(txt,'.txt','.nii.gz')
+	#img_name=string.replace(txt,'.1D','.nii.gz')
+	img_name=string.replace(txt,'.txt','.nii.gz')
 	print "this is the image name: %s" % img_name
 	#make a numpy array from seed time series
 	img_data=np.loadtxt(txt)

@@ -1545,8 +1545,8 @@ def NuisanceRegression(filtered_func,Nrois,MNItofuncWarp,outdir,motion=False,eig
 	import numpy as np
 	import nibabel as nib
 	import subprocess
-	#forcing eigenvariate to be true
-	#eig=True
+	#forcing eigenvariate to be false
+	eig=False
 	#get the current directory:
 	currentdir=os.getcwd()
 	#go the outdir to make sure "intermediary" files are dropped off in the same place as "final" files
@@ -1630,6 +1630,7 @@ def NuisanceRegression(filtered_func,Nrois,MNItofuncWarp,outdir,motion=False,eig
 	os.chdir(currentdir)
 
 	return NuisanceReg_func
+
 def Seedts2Img(func,seed,MNItofuncWarp,outdir,motion=False,eig=False):
 	import os
 	import string
@@ -1644,6 +1645,17 @@ def Seedts2Img(func,seed,MNItofuncWarp,outdir,motion=False,eig=False):
 	seed_ts=string.replace(subseed,'.nii.gz','_ts.txt')
 	seed_norm_ts=string.replace(subseed,'.nii.gz','_norm_ts.txt')
 	seedtsbase=string.replace(subseed,'.nii.gz','')
+	if eig:
+		seed_ts=string.replace(subseed,'.nii.gz','00.1D')
+		seed_norm_ts=string.replace(subseed,'.nii.gz','_norm_eig_ts.txt')
+		seedtsbase=string.replace(subseed,'.nii.gz','')
+	elif not eig:
+		seed_ts=string.replace(subseed,'.nii.gz','_ts.txt')
+		seed_norm_ts=string.replace(subseed,'.nii.gz','_norm_ts.txt')
+		seedtsbase=string.replace(subseed,'.nii.gz','')
+	else:
+		print "eig not set, exiting"
+		return 1
 
 	#tranform the seed from MNI space to func space
 	stdseed2subseed=fsl.ApplyWarp(in_file=seed,out_file=subseed,ref_file=func,field_file=MNItofuncWarp)
